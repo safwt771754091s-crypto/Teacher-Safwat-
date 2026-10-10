@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Exercise;
 use App\Models\Lesson;
 use App\Models\LessonSection;
 use App\Models\Textbook;
@@ -370,6 +371,61 @@ class ContentExtractionService
         }
 
         return array_values(array_filter($units, fn ($u) => ! empty($u['sections'])));
+    }
+
+    /**
+     * Surface the textbook's own exercise questions as draft exercises on each
+     * lesson. Only question text that is actually present in the page becomes a
+     * row; the answer is left empty and `verified_at` stays null so a supervisor
+     * must supply/verify it before publishing. Guarded against OCR noise: lines
+     * must be short Arabic prose containing a letter.
+     *
+     * Idempotent: existing draft exercises for the lesson are replaced, so
+     * improved OCR can be re-run without duplicating rows.
+     */
+    public function draftExercisesFromLesson(Lesson $lesson): int
+    {
+        $lesson->loadMissing('sections');
+
+        $questions = [];
+        $seen = [];
+        foreach ($lesson->sections as $section) {
+            foreach (preg_split('/\r\n|\r|\n/', (string) $section->content) as $line) {
+                $line = trim($line);
+                if ($line === '' || mb_strlen($line) > 120 || isset($seen[$line])) {
+                    continue;
+                }
+                if (! preg_match('/[\p{Arabic}]/u', $line)) {
+                    continue; // skip pure numbers/symbols (OCR noise on maths pages)
+                }
+                if (! preg_match('/^(?:[0-9\x{0660}-\x{0669}])?\s*(?:تمرين|تدريب|تدريبات|أجب|أكمل|اختر|صل|حل|سؤال|علل|استنتج|عدّ|عُدّ|اكتب|رتب|ضع)/u', $line)) {
+                    continue;
+                }
+                $seen[$line] = true;
+                $questions[] = [$line, $section->source_page];
+            }
+        }
+
+        if (empty($questions)) {
+            return 0;
+        }
+
+        $lesson->exercises()->whereNull('verified_at')->delete();
+
+        $created = 0;
+        foreach ($questions as $i => [$question, $page]) {
+            Exercise::create([
+                'lesson_id' => $lesson->id,
+                'type' => 'short_answer',
+                'question' => $question,
+                'answer' => null,
+                'source_page' => $page,
+                'sort_order' => $i,
+                'source' => 'textbook',
+            ]);
+            $created++;
+        }
+        return $created;
     }
 
     private function guessSectionType(string $line): string

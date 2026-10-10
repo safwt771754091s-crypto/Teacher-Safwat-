@@ -78,6 +78,32 @@ class ContentManagementTest extends TestCase
         $this->assertSame(7, $lessons[1]->page_to);
     }
 
+    public function test_textbook_questions_become_unverified_exercise_drafts(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب تمارين', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        $textbook->pages()->create(['page_number' => 2, 'extracted_text' => "الدرس الأول : الجمع\nنتعلم الجمع\nتمرين: اجمع ١ + ٢\nأكمل: ٣ + ٤ =\nعبارة عادية ليست سؤالاً\n٥ + ٦\n"]);
+        $extractor = app(\App\Services\ContentExtractionService::class);
+        $extractor->draftLessonsFromPages($textbook);
+        $lesson = $textbook->lessons()->firstOrFail();
+
+        $created = $extractor->draftExercisesFromLesson($lesson);
+        $this->assertSame(2, $created);
+
+        $exercises = $lesson->exercises()->orderBy('sort_order')->get();
+        $this->assertSame('textbook', $exercises[0]->source);
+        $this->assertNull($exercises[0]->answer);
+        $this->assertNull($exercises[0]->verified_at);
+        $this->assertStringContainsString('اجمع', $exercises[0]->question);
+
+        // Re-running replaces drafts instead of duplicating them.
+        $extractor->draftExercisesFromLesson($lesson);
+        $this->assertSame(2, $lesson->exercises()->count());
+    }
+
     public function test_owner_can_create_textbook_and_lesson(): void
     {
         $subject = Subject::first();
