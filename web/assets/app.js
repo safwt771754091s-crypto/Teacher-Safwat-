@@ -203,7 +203,7 @@
         area.innerHTML = `<h3>الكتب</h3><div class="grid cards">` + textbooks.map((t) => `
             <div class="card">
                 <strong>${esc(t.title)}</strong>
-                <span class="muted small">الفصل ${t.term === 'first' ? 'الأول' : 'الثاني'} · ${t.lessons_count} درس</span>
+                <span class="muted small">الفصل ${t.term === 'first' ? 'الأول' : 'الثاني'} · ${t.lessons_count} درس · ${authorityLabel(t.authority)}</span>
                 <button class="btn small" data-book="${t.id}">فتح الدروس</button>
             </div>`).join('') + `</div><div id="lessonsArea"></div>`;
         area.scrollIntoView({ behavior: 'smooth' });
@@ -597,7 +597,7 @@
                 <strong>${esc(t.title)}</strong>
                 <span class="badge ${t.status}">${statusLabel(t.status)}</span>
             </div>
-            <div class="muted small">${t.lessons_count} درس</div>
+            <div class="muted small">${t.lessons_count} درس · ${authorityLabel(t.authority)} · ${t.pages_count || 0} صفحة</div>
             <div class="ex-actions">
                 <button class="btn small" data-bact="upload-pdf" data-id="${t.id}">📤 رفع PDF</button>
                 <button class="btn small" data-bact="upload-page" data-id="${t.id}">🖼️ رفع صفحة</button>
@@ -612,6 +612,10 @@
 
     function statusLabel(s) {
         return ({ draft: 'مسودة', review: 'قيد المراجعة', published: 'منشور' })[s] || s;
+    }
+
+    function authorityLabel(a) {
+        return ({ aden: 'منهج عدن', sanaa: 'منهج صنعاء', common: 'منهج وطني' })[a] || '';
     }
 
     function bindBookAdmin() {

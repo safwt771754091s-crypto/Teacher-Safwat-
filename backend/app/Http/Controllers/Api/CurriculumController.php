@@ -7,6 +7,7 @@ use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\Subject;
 use App\Models\Textbook;
+use Illuminate\Http\Request;
 
 class CurriculumController extends Controller
 {
@@ -20,16 +21,23 @@ class CurriculumController extends Controller
         return response()->json(['subjects' => $grade->subjects()->withCount('textbooks')->get()]);
     }
 
-    public function textbooks(Subject $subject)
+    public function textbooks(Subject $subject, Request $request)
     {
-        return response()->json(['textbooks' => $subject->textbooks()->withCount('lessons')->get()]);
+        $query = $subject->textbooks()->withCount('lessons');
+        if ($authority = $request->query('authority')) {
+            $query->whereIn('authority', [$authority, 'common']);
+        }
+        return response()->json([
+            'textbooks' => $query->get(),
+            'authorities' => Textbook::AUTHORITIES,
+        ]);
     }
 
     public function lessons(Textbook $textbook)
     {
         $lessons = $textbook->lessons()->get(['id', 'title', 'page_from', 'page_to', 'sort_order', 'status']);
         return response()->json([
-            'textbook' => $textbook->only(['id', 'title', 'term', 'status', 'pages_count']),
+            'textbook' => $textbook->only(['id', 'title', 'term', 'status', 'pages_count', 'authority', 'branch']),
             'lessons' => $lessons,
         ]);
     }

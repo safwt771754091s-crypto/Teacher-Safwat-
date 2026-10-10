@@ -34,6 +34,24 @@ return [
         'textbook_disk' => env('TEXTBOOK_DISK', 'public'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Arabic OCR (for scanned textbook pages)
+    |--------------------------------------------------------------------------
+    | Many official Yemeni textbook PDFs are scanned images with no embedded
+    | text. When OCR is available the platform rasterises each PDF page and runs
+    | tesseract (Arabic) to fill textbook_pages.extracted_text, which a human then
+    | reviews and approves. OCR is never trusted blindly — output is marked for
+    | review, and when the text is unclear the source image remains the record.
+    */
+    'ocr' => [
+        'enabled' => (bool) env('OCR_ENABLED', true),
+        'tesseract' => env('OCR_TESSERACT', 'tesseract'),
+        'pdftoppm' => env('OCR_PDFTOPPM', 'pdftoppm'),
+        'language' => env('OCR_LANGUAGE', 'ara'),
+        'dpi' => (int) env('OCR_DPI', 160),
+    ],
+
     'game' => [
         'points_per_correct' => 10,
         'stars_perfect' => 3,

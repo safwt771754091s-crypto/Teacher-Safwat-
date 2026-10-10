@@ -6,7 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class Textbook extends Model
 {
-    protected $fillable = ['subject_id', 'title', 'term', 'edition', 'publisher', 'source_type', 'file_path', 'pages_count', 'status'];
+    protected $fillable = ['subject_id', 'title', 'term', 'edition', 'publisher', 'authority', 'branch', 'source_type', 'file_path', 'pages_count', 'status'];
+
+    public const AUTHORITIES = ['common' => 'مشترك', 'sanaa' => 'صنعاء', 'aden' => 'عدن'];
+
+    public const BRANCHES = ['general' => 'عام', 'scientific' => 'علمي', 'literary' => 'أدبي'];
 
     public function subject()
     {

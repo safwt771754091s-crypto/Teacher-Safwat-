@@ -38,6 +38,28 @@ class CurriculumTest extends TestCase
         }
     }
 
+    public function test_textbooks_expose_authority_and_can_be_filtered(): void
+    {
+        $grade = Grade::where('level', 1)->first();
+        $subject = $grade->subjects()->first();
+        $subject->textbooks()->create([
+            'title' => 'كتاب منهج عدن', 'term' => 'first', 'source_type' => 'pdf',
+            'authority' => 'aden', 'status' => 'published',
+        ]);
+        $subject->textbooks()->create([
+            'title' => 'كتاب منهج صنعاء', 'term' => 'first', 'source_type' => 'pdf',
+            'authority' => 'sanaa', 'status' => 'published',
+        ]);
+
+        $all = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks")->assertOk();
+        $this->assertArrayHasKey('authorities', $all->json());
+
+        $aden = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks?authority=aden")->assertOk();
+        $titles = collect($aden->json('textbooks'))->pluck('title');
+        $this->assertTrue($titles->contains('كتاب منهج عدن'));
+        $this->assertFalse($titles->contains('كتاب منهج صنعاء'));
+    }
+
     public function test_page_source_is_retrievable(): void
     {
         $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
