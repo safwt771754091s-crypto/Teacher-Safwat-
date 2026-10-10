@@ -1,0 +1,123 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\AiUsageLog;
+use App\Models\Lesson;
+use App\Models\Role;
+use App\Models\Setting;
+use App\Models\User;
+use Illuminate\Http\Request;
+
+class OwnerController extends Controller
+{
+    public function users(Request $request)
+    {
+        $q = User::query();
+        if ($request->filled('role')) {
+            $q->where('role', $request->string('role'));
+        }
+        if ($request->filled('search')) {
+            $q->where(fn ($w) => $w->where('name', 'like', '%' . $request->string('search') . '%')
+                ->orWhere('email', 'like', '%' . $request->string('search') . '%'));
+        }
+        return response()->json(['users' => $q->withCount('teacherAssignments')->orderByDesc('id')->paginate(30)]);
+    }
+
+    public function storeUser(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:6'],
+            'role' => ['required', 'in:owner,admin,teacher,parent,student'],
+            'grade_id' => ['nullable', 'exists:grades,id'],
+        ]);
+
+        $user = User::create($data);
+        if ($user->role === User::ROLE_STUDENT) {
+            $user->studentProfile()->create(['grade_id' => $data['grade_id'] ?? null]);
+        }
+        return response()->json(['user' => $user], 201);
+    }
+
+    public function updateUser(Request $request, User $user)
+    {
+        $data = $request->validate([
+            'role' => ['nullable', 'in:owner,admin,teacher,parent,student'],
+            'status' => ['nullable', 'in:active,suspended'],
+            'name' => ['nullable', 'string', 'max:120'],
+            'phone' => ['nullable', 'string', 'max:30'],
+        ]);
+        $user->update(array_filter($data, fn ($v) => $v !== null));
+        return response()->json(['user' => $user]);
+    }
+
+    public function assignRole(Request $request)
+    {
+        $data = $request->validate([
+            'user_id' => ['required', 'exists:users,id'],
+            'role' => ['required', 'in:owner,admin,teacher,parent,student'],
+        ]);
+        $user = User::findOrFail($data['user_id']);
+        $user->update(['role' => $data['role']]);
+        return response()->json(['user' => $user]);
+    }
+
+    public function roles()
+    {
+        return response()->json(['roles' => Role::all()]);
+    }
+
+    public function aiUsage()
+    {
+        $total = AiUsageLog::count();
+        $cost = (float) AiUsageLog::sum('cost');
+        $failed = AiUsageLog::where('success', false)->count();
+        $byFeature = AiUsageLog::selectRaw('feature, count(*) c, sum(cost) cost')
+            ->groupBy('feature')->get();
+        return response()->json([
+            'total_requests' => $total,
+            'total_cost' => $cost,
+            'failed' => $failed,
+            'by_feature' => $byFeature,
+            'recent' => AiUsageLog::with('user:id,name')->latest()->take(20)->get(),
+        ]);
+    }
+
+    public function settings()
+    {
+        return response()->json(['settings' => Setting::all()]);
+    }
+
+    public function updateSettings(Request $request)
+    {
+        $data = $request->validate(['key' => ['required', 'string'], 'value' => ['nullable']]);
+        Setting::set($data['key'], $data['value']);
+        return response()->json(['message' => 'تم الحفظ.']);
+    }
+
+    public function overview()
+    {
+        return response()->json([
+            'counts' => [
+                'users' => User::count(),
+                'students' => User::where('role', 'student')->count(),
+                'teachers' => User::where('role', 'teacher')->count(),
+                'parents' => User::where('role', 'parent')->count(),
+                'lessons' => Lesson::count(),
+                'published_lessons' => Lesson::where('status', 'published')->count(),
+            ],
+            'ai' => [
+                'requests' => AiUsageLog::count(),
+                'cost' => (float) AiUsageLog::sum('cost'),
+            ],
+        ]);
+    }
+
+    public function errors()
+    {
+        return response()->json(['logs' => AiUsageLog::where('success', false)->latest()->take(50)->get()]);
+    }
+}
