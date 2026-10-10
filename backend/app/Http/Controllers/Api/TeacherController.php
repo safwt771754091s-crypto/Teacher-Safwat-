@@ -202,6 +202,7 @@ class TeacherController extends Controller
             'hint' => $data['hint'] ?? null,
             'verified_by' => $request->user()->id,
             'verified_at' => now(),
+            'is_draft' => false,
         ], fn ($v) => ! is_null($v)));
 
         return response()->json(['exercise' => $exercise]);

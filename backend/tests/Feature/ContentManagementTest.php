@@ -20,6 +20,11 @@ class ContentManagementTest extends TestCase
         return User::where('email', 'owner@school.ye')->first();
     }
 
+    private function student(): User
+    {
+        return User::where('email', 'student@school.ye')->first();
+    }
+
     public function test_font_mojibake_is_treated_as_unreadable(): void
     {
         $extractor = app(\App\Services\ContentExtractionService::class);
@@ -95,6 +100,7 @@ class ContentManagementTest extends TestCase
 
         $exercises = $lesson->exercises()->orderBy('sort_order')->get();
         $this->assertSame('textbook', $exercises[0]->source);
+        $this->assertTrue($exercises[0]->is_draft);
         $this->assertNull($exercises[0]->answer);
         $this->assertNull($exercises[0]->verified_at);
         $this->assertStringContainsString('اجمع', $exercises[0]->question);
@@ -102,6 +108,28 @@ class ContentManagementTest extends TestCase
         // Re-running replaces drafts instead of duplicating them.
         $extractor->draftExercisesFromLesson($lesson);
         $this->assertSame(2, $lesson->exercises()->count());
+    }
+
+    public function test_unverified_ocr_drafts_are_hidden_from_learners(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب إظهار', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'published',
+        ]);
+        $lesson = $textbook->lessons()->create([
+            'title' => 'درس', 'page_from' => 1, 'page_to' => 1, 'sort_order' => 1, 'status' => 'published',
+        ]);
+        $lesson->exercises()->create(['type' => 'short_answer', 'question' => 'مسودة', 'source' => 'textbook', 'is_draft' => true, 'sort_order' => 0]);
+        $lesson->exercises()->create(['type' => 'numeric', 'question' => 'مؤلف', 'answer' => '٥', 'source' => 'textbook', 'is_draft' => false, 'sort_order' => 1]);
+
+        $res = $this->actingAs($this->student(), 'sanctum')
+            ->getJson("/api/v1/lessons/{$lesson->id}/exercises")
+            ->assertOk();
+
+        $questions = array_column($res->json('exercises'), 'question');
+        $this->assertNotContains('مسودة', $questions);
+        $this->assertContains('مؤلف', $questions);
     }
 
     public function test_owner_can_create_textbook_and_lesson(): void

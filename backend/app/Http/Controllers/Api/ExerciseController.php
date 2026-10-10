@@ -16,7 +16,12 @@ class ExerciseController extends Controller
 
     public function index(Lesson $lesson)
     {
-        return response()->json(['exercises' => $lesson->exercises()->with('options')->get()]);
+        // Drafts (questions surfaced from scanned pages, no answer yet) are
+        // withheld from learners until a human verifies them. Authored/teacher
+        // exercises are always shown.
+        return response()->json([
+            'exercises' => $lesson->exercises()->where('is_draft', false)->with('options')->get(),
+        ]);
     }
 
     public function submit(Request $request, Exercise $exercise)

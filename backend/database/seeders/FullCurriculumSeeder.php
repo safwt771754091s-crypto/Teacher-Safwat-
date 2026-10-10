@@ -284,6 +284,12 @@ class FullCurriculumSeeder extends Seeder
 
     private function createLesson(Textbook $book, string $title, int $from, int $to, int $order, array $points, array $exercises): Lesson
     {
+        // Idempotent: re-running the seeder must not duplicate lessons.
+        $existing = Lesson::where('textbook_id', $book->id)->where('title', $title)->first();
+        if ($existing && $existing->sections()->exists()) {
+            return $existing;
+        }
+
         $lesson = Lesson::create([
             'textbook_id' => $book->id,
             'title' => $title,

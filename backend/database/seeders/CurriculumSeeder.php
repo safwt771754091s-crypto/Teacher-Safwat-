@@ -58,7 +58,7 @@ class CurriculumSeeder extends Seeder
 
         // ---- الرياضيات ----
         $math = Subject::where('grade_id', $grade1->id)->where('name', 'الرياضيات')->first();
-        $mathBook = Textbook::create([
+        $mathBook = Textbook::firstOrCreate([
             'subject_id' => $math->id,
             'title' => 'الرياضيات - الصف الأول الأساسي',
             'term' => 'first',
@@ -71,7 +71,7 @@ class CurriculumSeeder extends Seeder
 
         // ---- لغتي الجميلة ----
         $arabic = Subject::where('grade_id', $grade1->id)->where('name', 'لغتي الجميلة (العربية)')->first();
-        $arBook = Textbook::create([
+        $arBook = Textbook::firstOrCreate([
             'subject_id' => $arabic->id,
             'title' => 'لغتي الجميلة - الصف الأول الأساسي',
             'term' => 'first',
@@ -84,7 +84,7 @@ class CurriculumSeeder extends Seeder
 
         // ---- العلوم ----
         $science = Subject::where('grade_id', $grade1->id)->where('name', 'العلوم')->first();
-        $sciBook = Textbook::create([
+        $sciBook = Textbook::firstOrCreate([
             'subject_id' => $science->id,
             'title' => 'العلوم - الصف الأول الأساسي',
             'term' => 'first',
@@ -97,7 +97,7 @@ class CurriculumSeeder extends Seeder
 
         // ---- التربية الإسلامية ----
         $islamic = Subject::where('grade_id', $grade1->id)->where('name', 'التربية الإسلامية')->first();
-        $isBook = Textbook::create([
+        $isBook = Textbook::firstOrCreate([
             'subject_id' => $islamic->id,
             'title' => 'التربية الإسلامية - الصف الأول الأساسي',
             'term' => 'first',
@@ -111,6 +111,12 @@ class CurriculumSeeder extends Seeder
 
     private function lesson(Textbook $book, string $title, int $from, int $to, int $order, array $sections, array $exercises = []): Lesson
     {
+        // Idempotent: re-running the seeder must not duplicate an authored lesson.
+        $existing = Lesson::where('textbook_id', $book->id)->where('title', $title)->first();
+        if ($existing && $existing->sections()->exists()) {
+            return $existing;
+        }
+
         $lesson = Lesson::create([
             'textbook_id' => $book->id,
             'title' => $title,

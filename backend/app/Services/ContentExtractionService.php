@@ -210,6 +210,12 @@ class ContentExtractionService
      */
     public function draftLessonsFromPages(Textbook $textbook): int
     {
+        // Never overwrite curated lessons (authored/approved content). Only books
+        // with no published lessons are segmented from their page text.
+        if ($textbook->lessons()->where('status', 'published')->exists()) {
+            return 0;
+        }
+
         $pages = $textbook->pages()->orderBy('page_number')
             ->get()
             ->filter(fn ($p) => $this->looksReadable((string) $p->extracted_text));
@@ -410,7 +416,9 @@ class ContentExtractionService
             return 0;
         }
 
-        $lesson->exercises()->whereNull('verified_at')->delete();
+        // Only replace drafts this extractor created. Authored/teacher exercises
+        // (is_draft = false) are never touched.
+        $lesson->exercises()->where('is_draft', true)->delete();
 
         $created = 0;
         foreach ($questions as $i => [$question, $page]) {
@@ -422,6 +430,7 @@ class ContentExtractionService
                 'source_page' => $page,
                 'sort_order' => $i,
                 'source' => 'textbook',
+                'is_draft' => true,
             ]);
             $created++;
         }
