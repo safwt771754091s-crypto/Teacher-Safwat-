@@ -33,6 +33,7 @@ class AiTeacherService
         $lesson->loadMissing(['sections', 'approvedSummary', 'textbook.pages']);
 
         $points = [];
+        $cited = []; // ['text' => string, 'page' => ?int] for per-point citation
         $pages = [];
 
         // Prefer the approved summary when present; otherwise fall back to the
@@ -40,11 +41,18 @@ class AiTeacherService
         // only one to avoid duplicating points in the explanation.
         $summary = $lesson->approvedSummary;
         if ($summary && ! empty($summary->points)) {
+            $summaryPages = array_values(array_filter(array_map('intval', (array) $summary->source_pages)));
+            $fallbackPage = $summaryPages[0] ?? null;
             foreach ($summary->points as $p) {
-                $points[] = is_array($p) ? ($p['text'] ?? '') : (string) $p;
+                $text = is_array($p) ? ($p['text'] ?? '') : (string) $p;
+                if ($text === '') {
+                    continue;
+                }
+                $points[] = $text;
+                $cited[] = ['text' => $text, 'page' => is_array($p) && isset($p['page']) ? (int) $p['page'] : $fallbackPage];
             }
-            foreach ((array) $summary->source_pages as $pg) {
-                $pages[] = (int) $pg;
+            foreach ($summaryPages as $pg) {
+                $pages[] = $pg;
             }
             foreach ($lesson->sections as $section) {
                 if ($section->source_page) {
@@ -55,6 +63,7 @@ class AiTeacherService
             foreach ($lesson->sections as $section) {
                 if ($section->content) {
                     $points[] = $section->content;
+                    $cited[] = ['text' => $section->content, 'page' => $section->source_page ? (int) $section->source_page : null];
                     if ($section->source_page) {
                         $pages[] = (int) $section->source_page;
                     }
@@ -69,6 +78,7 @@ class AiTeacherService
 
         return [
             'points' => array_values(array_filter($points)),
+            'cited_points' => $cited,
             'pages' => $pages,
             'source_text' => $sourceText,
         ];
@@ -113,12 +123,18 @@ class AiTeacherService
 
     private function composeFromSource(array $ctx, ?string $question): array
     {
-        $lines = array_values(array_unique($ctx['points']));
         $out = [];
         $out[] = 'شرح الدرس من كتاب المنهج اليمني:';
         $idx = 1;
-        foreach ($lines as $line) {
-            $out[] = $idx . '. ' . $line;
+        $seen = [];
+        foreach ($ctx['cited_points'] as $point) {
+            $line = trim((string) $point['text']);
+            if ($line === '' || isset($seen[$line])) {
+                continue;
+            }
+            $seen[$line] = true;
+            $cite = ! empty($point['page']) ? ' (صفحة ' . (int) $point['page'] . ')' : '';
+            $out[] = $idx . '. ' . $line . $cite;
             $idx++;
         }
         if ($question) {

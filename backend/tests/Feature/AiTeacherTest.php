@@ -28,6 +28,9 @@ class AiTeacherTest extends TestCase
         $joined = implode(' ', $res->json('explanation'));
         $this->assertStringContainsString('الجمع', $joined);
         $this->assertStringContainsString('زائد', $joined);
+        // Each explained point carries its textbook page so the student can
+        // verify it, rather than trusting a free-floating claim.
+        $this->assertStringContainsString('صفحة', $joined);
     }
 
     public function test_lesson_without_content_does_not_invent(): void
