@@ -198,39 +198,104 @@ class ContentExtractionService
     }
 
     /**
-     * Split extracted page text into lessons heuristically, so admins get a
-     * draft they can correct rather than a blank slate. Nothing is invented:
-     * only text present in the pages becomes a section.
+     * Segment a textbook into lessons by its own headings. Yemeni editions label
+     * each lesson "الدرس ..." (with variants like "الدرس الأول" or OCR slips such
+     * as "الدرس الغالت"); units are "الوحدة ..." and chapters "الفصل ...". A
+     * lesson runs from its heading page to the page before the next heading.
+     *
+     * Idempotent: previous draft lessons for the book are replaced, so a re-run
+     * (e.g. after OCR improves) never duplicates content. Everything stays in
+     * 'draft' for human review.
      */
     public function draftLessonsFromPages(Textbook $textbook): int
     {
-        $pages = $textbook->pages()->orderBy('page_number')->get();
-        $created = 0;
+        $pages = $textbook->pages()->orderBy('page_number')
+            ->get()
+            ->filter(fn ($p) => $this->looksReadable((string) $p->extracted_text));
+
+        $lessons = [];   // list of ['title','page_from','page_to','sections'=>[]]
+        $current = null; // active lesson index
+        $unit = null;    // last seen unit heading, used as fallback title
+
         foreach ($pages as $page) {
             $lines = preg_split('/\r\n|\r|\n/', (string) $page->extracted_text);
             $lines = array_values(array_filter(array_map('trim', $lines), fn ($l) => $l !== ''));
-            if (count($lines) < 2) {
+
+            // A contents/index page lists many lesson titles in a row; treating
+            // it as lesson starts would create dozens of empty lessons. Skip it.
+            $headingCount = count(array_filter($lines, fn ($l) => $this->isLessonHeading($l)));
+            if ($headingCount >= 3) {
                 continue;
             }
-            $title = $this->guessTitle($lines);
-            $lesson = Lesson::create([
-                'textbook_id' => $textbook->id,
-                'title' => $title,
-                'page_from' => $page->page_number,
-                'page_to' => $page->page_number,
-                'sort_order' => $page->page_number,
-                'status' => 'draft',
-            ]);
-            $order = 0;
+
             foreach ($lines as $line) {
-                if ($line === $title) {
+                if ($this->isUnitHeading($line)) {
+                    $unit = $line;
                     continue;
                 }
-                LessonSection::create([
-                    'lesson_id' => $lesson->id,
+                if ($this->isLessonHeading($line)) {
+                    $lessons[] = [
+                        'title' => $this->cleanHeading($line),
+                        'page_from' => $page->page_number,
+                        'page_to' => $page->page_number,
+                        'sections' => [],
+                    ];
+                    $current = count($lessons) - 1;
+                    continue;
+                }
+                if ($current === null) {
+                    continue; // front matter (contents, unit intro) is not a lesson
+                }
+                $lessons[$current]['page_to'] = $page->page_number;
+                $lessons[$current]['sections'][] = [
                     'type' => $this->guessSectionType($line),
                     'content' => $line,
                     'source_page' => $page->page_number,
+                ];
+            }
+        }
+
+        // Drop heading-only fragments: an empty lesson is a stray heading, not a
+        // lesson with content.
+        $lessons = array_values(array_filter($lessons, fn ($l) => ! empty($l['sections'])));
+
+        // If the edition never prints "الدرس" headings, fall back to one lesson
+        // per unit so the book is still navigable rather than empty.
+        if (empty($lessons) && $unit) {
+            foreach ($pages as $page) {
+                $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $page->extracted_text))));
+                $lessons[] = [
+                    'title' => 'الوحدة: ' . mb_substr($unit, 0, 100),
+                    'page_from' => $page->page_number,
+                    'page_to' => $page->page_number,
+                    'sections' => array_map(fn ($l) => [
+                        'type' => $this->guessSectionType($l),
+                        'content' => $l,
+                        'source_page' => $page->page_number,
+                    ], $lines),
+                ];
+            }
+        }
+
+        $textbook->lessons()->delete();
+
+        $created = 0;
+        foreach ($lessons as $i => $data) {
+            $lesson = Lesson::create([
+                'textbook_id' => $textbook->id,
+                'title' => $data['title'],
+                'page_from' => $data['page_from'],
+                'page_to' => $data['page_to'],
+                'sort_order' => $i,
+                'status' => 'draft',
+            ]);
+            $order = 0;
+            foreach ($data['sections'] as $section) {
+                LessonSection::create([
+                    'lesson_id' => $lesson->id,
+                    'type' => $section['type'],
+                    'content' => $section['content'],
+                    'source_page' => $section['source_page'],
                     'sort_order' => $order++,
                     'is_from_textbook' => true,
                 ]);
@@ -240,14 +305,24 @@ class ContentExtractionService
         return $created;
     }
 
-    private function guessTitle(array $lines): string
+    private function isLessonHeading(string $line): bool
     {
-        foreach ($lines as $line) {
-            if (mb_strlen($line) <= 60 && !preg_match('/^\d/', $line)) {
-                return $line;
-            }
-        }
-        return mb_substr($lines[0], 0, 60);
+        return (bool) preg_match('/^الدرس\b/u', $line);
+    }
+
+    /**
+     * Tidy an OCR lesson heading: strip a trailing dot-page leader (". ١٢" or
+     * "..") that contents pages append, and collapse whitespace.
+     */
+    private function cleanHeading(string $line): string
+    {
+        $line = preg_replace('/[\s.\x{0640}]+$/u', '', trim($line));
+        return mb_substr(trim((string) $line), 0, 120);
+    }
+
+    private function isUnitHeading(string $line): bool
+    {
+        return (bool) preg_match('/^(الوحدة|الفصل)\b/u', $line);
     }
 
     private function guessSectionType(string $line): string

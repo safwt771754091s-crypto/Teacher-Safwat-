@@ -28,6 +28,34 @@ class ContentManagementTest extends TestCase
         $this->assertFalse($extractor->textIsReadable('?‰u?????'));
     }
 
+    public function test_lessons_are_segmented_by_textbook_headings(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب اختبار', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        // A contents page (>=3 headings) must not spawn lessons.
+        $textbook->pages()->create(['page_number' => 1, 'extracted_text' => "الفهرس\nالدرس الأول : أ\nالدرس الثاني : ب\nالدرس الثالث : ج\n"]);
+        $textbook->pages()->create(['page_number' => 2, 'extracted_text' => "الوحدة الأولى\nالدرس الأول : الجمع\nأهداف الدرس\nنتعلم الجمع حتى عشرة\n"]);
+        $textbook->pages()->create(['page_number' => 3, 'extracted_text' => "أمثلة على الجمع\n٢ + ٣ = ٥\n"]);
+        $textbook->pages()->create(['page_number' => 4, 'extracted_text' => "الدرس الثاني : الطرح\nنتعلم الطرح البسيط\n"]);
+
+        $created = app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $this->assertSame(2, $created);
+
+        $lessons = $textbook->lessons()->orderBy('sort_order')->get();
+        $this->assertSame('الدرس الأول : الجمع', $lessons[0]->title);
+        $this->assertSame(2, $lessons[0]->page_from);
+        $this->assertSame(3, $lessons[0]->page_to);
+        $this->assertGreaterThan(0, $lessons[0]->sections()->count());
+        $this->assertSame('الدرس الثاني : الطرح', $lessons[1]->title);
+
+        // Re-running must not duplicate lessons.
+        app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $this->assertSame(2, $textbook->lessons()->count());
+    }
+
     public function test_owner_can_create_textbook_and_lesson(): void
     {
         $subject = Subject::first();
