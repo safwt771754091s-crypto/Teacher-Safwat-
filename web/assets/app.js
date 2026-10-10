@@ -334,6 +334,7 @@
                 <button class="btn small primary" data-act="submit" data-id="${ex.id}">تحقق</button>
                 <button class="btn small ghost" data-act="hint" data-id="${ex.id}">تلميح</button>
                 <button class="btn small ghost" data-act="solution" data-id="${ex.id}">الحل خطوة بخطوة</button>
+                <button class="btn small ghost" data-act="ai-solution" data-id="${ex.id}">🤖 اشرح لي</button>
             </div>
             <div class="ex-feedback"></div>
         </div>`;
@@ -365,6 +366,14 @@
                         const r = await API.get(`/exercises/${id}/hint`);
                         fb.className = 'ex-feedback hint';
                         fb.innerHTML = `💡 ${esc(r.hint)}`;
+                    } else if (b.dataset.act === 'ai-solution') {
+                        const r = await API.post(`/exercises/${id}/ai-solution`, {});
+                        fb.className = 'ex-feedback steps';
+                        const cite = r.source_page ? ` <span class="muted small">(صفحة ${esc(r.source_page)})</span>` : '';
+                        fb.innerHTML = `<div class="ai-title">🤖 شرح المعلم الذكي${cite}</div>` +
+                            `<ol>${(r.steps || []).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` +
+                            (r.answer ? `<div class="muted small">الإجابة: ${esc(r.answer)}</div>` : '') +
+                            (r.needs_content ? `<div class="muted small">هذا السؤال يحتاج محتوى الدرس أولًا.</div>` : '');
                     } else {
                         const r = await API.get(`/exercises/${id}/solution`);
                         fb.className = 'ex-feedback steps';
@@ -704,14 +713,50 @@
         out.innerHTML = `<div class="lesson-admin">
             <div class="ask-row"><input id="nlTitle" placeholder="عنوان درس جديد"><button class="btn small primary" id="nlAdd">إضافة درس</button></div>
             <ul class="lesson-list">${d.lessons.map((l) => `<li class="lesson-item"><span class="lesson-title">${esc(l.title)}</span>
-                <button class="btn small ghost" data-sum="${l.id}">توليد ملخص</button></li>`).join('')}</ul>
+                <button class="btn small ghost" data-sum="${l.id}">توليد ملخص</button>
+                <button class="btn small ghost" data-suggest="${l.id}">🤖 اقترح حلولًا</button></li>`).join('')}</ul>
             <div class="summaries-out"></div>
+            <div class="suggestions-out"></div>
         </div>`;
         el('nlAdd').onclick = async () => {
             busy(true);
             try { await API.post(`/textbooks/${bookId}/lessons`, { title: el('nlTitle').value }); toast('تمت الإضافة'); openLessonAdmin(bookId, card); }
             catch (e) { toast(e.message, 'error'); } finally { busy(false); }
         };
+        const suggestionsOut = out.querySelector('.suggestions-out');
+        out.querySelectorAll('[data-suggest]').forEach((b) => {
+            b.onclick = async () => {
+                busy(true);
+                try {
+                    const d2 = await API.post(`/lessons/${b.dataset.suggest}/suggest-solutions`, {});
+                    if (!d2.count) { toast('لا توجد تمارين بحاجة إلى حل'); return; }
+                    suggestionsOut.innerHTML = `<div class="card"><strong>اقتراحات المعلم الذكي (${d2.count})</strong>
+                        <p class="muted small">راجع كل اقتراح ثم اعتمده لنشره للطلاب.</p>
+                        ${d2.suggestions.map((s) => `<div class="suggestion" data-ex="${s.exercise_id}">
+                            <div class="ex-q">${esc(s.question)}</div>
+                            <div class="muted small">الثقة: ${esc(s.suggestion.confidence)} · المصدر: ${esc(s.suggestion.provider)}</div>
+                            <ol class="points">${(s.suggestion.solution_steps || []).map((x) => `<li class="pt">${esc(x)}</li>`).join('')}</ol>
+                            <input class="s-answer" placeholder="الإجابة المرجعية" value="${esc(s.suggestion.answer || '')}">
+                            <input class="s-hint" placeholder="تلميح (اختياري)" value="${esc(s.suggestion.hint || '')}">
+                            <button class="btn small primary" data-approve-ex="${s.exercise_id}">اعتماد ونشر</button>
+                        </div>`).join('')}</div>`;
+                    suggestionsOut.querySelectorAll('[data-approve-ex]').forEach((btn) => {
+                        btn.onclick = async () => {
+                            const box = btn.closest('.suggestion');
+                            busy(true);
+                            try {
+                                await API.post(`/exercises/${btn.dataset.approveEx}/verify`, {
+                                    answer: box.querySelector('.s-answer').value,
+                                    hint: box.querySelector('.s-hint').value || null,
+                                });
+                                toast('تم الاعتماد والنشر');
+                                box.remove();
+                            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+                        };
+                    });
+                } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+            };
+        });
         const summariesOut = out.querySelector('.summaries-out');
         out.querySelectorAll('[data-sum]').forEach((b) => {
             b.onclick = async () => {

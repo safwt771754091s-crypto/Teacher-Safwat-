@@ -18,8 +18,10 @@ use App\Models\StudentProfile;
  */
 class ExerciseService
 {
-    public function __construct(private AiTeacherService $ai)
-    {
+    public function __construct(
+        private AiTeacherService $ai,
+        private NumericVerifier $numbers,
+    ) {
     }
 
     /**
@@ -165,66 +167,18 @@ class ExerciseService
 
     private function extractExpression(string $value): ?float
     {
-        $value = $this->normalizeDigits(trim($value));
-        $value = str_replace(['×', 'x', 'X', '÷', '\\'], ['*', '*', '*', '/', '/'], $value);
-        if ($value === '' || ! preg_match('~^[-+*/().\d\s]+$~', $value)) {
-            return null;
-        }
-        try {
-            if (! preg_match('/[+\-*\/]/', $value)) {
-                return (float) $value;
-            }
-            return (float) $this->evalSimple($value);
-        } catch (\Throwable) {
-            return null;
-        }
+        return $this->numbers->evaluate($value);
     }
 
     /**
-     * Tiny safe evaluator for + - * / and parentheses (no eval()).
+     * Deterministically evaluate a numeric answer/expression (Arabic-Indic or
+     * Latin digits). Returns null when the value is not a pure arithmetic
+     * expression, so callers never treat free text as a computed result.
+     * This is the authoritative check the AI is not allowed to override.
      */
-    private function evalSimple(string $expr): float
+    public function evaluateNumeric(string $value): ?float
     {
-        $tokens = preg_split('/\s*/', $expr, -1, PREG_SPLIT_NO_EMPTY);
-        $stack = [];
-        $out = [];
-        $prec = ['+' => 1, '-' => 1, '*' => 2, '/' => 2];
-        $ops = [];
-        foreach ($tokens as $t) {
-            if (is_numeric($t)) {
-                $out[] = (float) $t;
-            } elseif ($t === '(') {
-                $ops[] = $t;
-            } elseif ($t === ')') {
-                while (end($ops) !== '(') {
-                    $out[] = array_pop($ops);
-                }
-                array_pop($ops);
-            } else {
-                while ($ops && end($ops) !== '(' && $prec[end($ops)] >= $prec[$t]) {
-                    $out[] = array_pop($ops);
-                }
-                $ops[] = $t;
-            }
-        }
-        while ($ops) {
-            $out[] = array_pop($ops);
-        }
-        foreach ($out as $t) {
-            if (is_float($t)) {
-                $stack[] = $t;
-            } else {
-                $b = array_pop($stack);
-                $a = array_pop($stack);
-                $stack[] = match ($t) {
-                    '+' => $a + $b,
-                    '-' => $a - $b,
-                    '*' => $a * $b,
-                    '/' => $b == 0 ? throw new \RuntimeException('div0') : $a / $b,
-                };
-            }
-        }
-        return (float) end($stack);
+        return $this->extractExpression($value);
     }
 
     public function normalizeAnswer(string $value): string
@@ -240,7 +194,6 @@ class ExerciseService
 
     private function normalizeDigits(string $value): string
     {
-        $arabic = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-        return str_replace($arabic, ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'], $value);
+        return $this->numbers->normalizeDigits($value);
     }
 }

@@ -208,6 +208,41 @@ class TeacherController extends Controller
         return response()->json(['exercise' => $exercise]);
     }
 
+    /**
+     * Ask the AI to suggest a reference answer, solution steps and hint for one
+     * exercise. The suggestion is returned only — it is never written to the
+     * published exercise until a human approves it (see verifyExercise).
+     */
+    public function suggestSolution(Request $request, Exercise $exercise)
+    {
+        return response()->json(['suggestion' => $this->ai->draftSolution($exercise, $request->user())]);
+    }
+
+    /**
+     * Draft solutions for every unanswered exercise in a lesson, for reviewers
+     * to work through in bulk. Suggestions are returned as a list; nothing is
+     * published here.
+     */
+    public function suggestLessonSolutions(Request $request, Lesson $lesson)
+    {
+        $exercises = $lesson->exercises()
+            ->where(fn ($q) => $q->whereNull('answer')->orWhere('answer', ''))
+            ->with('options')
+            ->get();
+
+        $suggestions = $exercises->map(fn (Exercise $exercise) => [
+            'exercise_id' => $exercise->id,
+            'question' => $exercise->question,
+            'suggestion' => $this->ai->draftSolution($exercise, $request->user()),
+        ])->values();
+
+        return response()->json([
+            'lesson_id' => $lesson->id,
+            'count' => $suggestions->count(),
+            'suggestions' => $suggestions,
+        ]);
+    }
+
     public function generateSummary(Lesson $lesson)
     {
         return response()->json(['summary' => $this->ai->summarize($lesson)]);

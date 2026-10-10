@@ -203,6 +203,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 .switch { display: flex; align-items: center; gap: 10px; }
 .switch input { width: auto; }
 .summary-draft { background: var(--green-light); }
+.ai-title { font-weight: 700; color: var(--green); margin-bottom: 4px; }
+.suggestion { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.suggestion .s-answer, .suggestion .s-hint { display: block; width: 100%; margin: 6px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
 .badge.raw { background: #999; }
 .badge.extracted { background: var(--gold); }
 .badge.reviewed { background: var(--green); }

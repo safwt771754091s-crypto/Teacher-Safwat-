@@ -5,13 +5,16 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Exercise;
 use App\Models\Lesson;
+use App\Services\AiTeacherService;
 use App\Services\ExerciseService;
 use Illuminate\Http\Request;
 
 class ExerciseController extends Controller
 {
-    public function __construct(private ExerciseService $exercises)
-    {
+    public function __construct(
+        private ExerciseService $exercises,
+        private AiTeacherService $ai,
+    ) {
     }
 
     public function index(Lesson $lesson)
@@ -64,5 +67,15 @@ class ExerciseController extends Controller
             'answer' => $exercise->answer,
             'source_page' => $exercise->source_page,
         ]);
+    }
+
+    /**
+     * The AI teacher walks the student through *how to solve* this exercise,
+     * grounded in the lesson's textbook content. Draft exercises are still
+     * visible here so a student can get help, but they always cite the source.
+     */
+    public function aiSolution(Request $request, Exercise $exercise)
+    {
+        return response()->json($this->ai->explainSolution($exercise, $request->user()));
     }
 }

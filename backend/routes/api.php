@@ -54,6 +54,7 @@ Route::prefix('v1')->group(function () {
         Route::get('lessons/{lesson}/exercises', [ExerciseController::class, 'index']);
         Route::get('exercises/{exercise}/hint', [ExerciseController::class, 'hint']);
         Route::get('exercises/{exercise}/solution', [ExerciseController::class, 'solution']);
+        Route::post('exercises/{exercise}/ai-solution', [ExerciseController::class, 'aiSolution']);
         Route::post('exercises/{exercise}/submit', [ExerciseController::class, 'submit'])
             ->middleware('role:student');
 
@@ -82,6 +83,8 @@ Route::prefix('v1')->group(function () {
             Route::post('lessons/{lesson}/sections', [TeacherController::class, 'createSection']);
             Route::post('lessons/{lesson}/exercises', [TeacherController::class, 'createExercise']);
             Route::post('exercises/{exercise}/verify', [TeacherController::class, 'verifyExercise']);
+            Route::post('exercises/{exercise}/suggest-solution', [TeacherController::class, 'suggestSolution']);
+            Route::post('lessons/{lesson}/suggest-solutions', [TeacherController::class, 'suggestLessonSolutions']);
             Route::post('lessons/{lesson}/generate-summary', [TeacherController::class, 'generateSummary']);
             Route::post('summaries/{summary}/approve', [TeacherController::class, 'approveSummary']);
             Route::get('teacher/struggling-lessons', [TeacherController::class, 'strugglingLessons']);

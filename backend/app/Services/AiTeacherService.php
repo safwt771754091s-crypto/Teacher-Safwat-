@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AiUsageLog;
+use App\Models\Exercise;
 use App\Models\Lesson;
 use App\Models\Summary;
 use App\Models\User;
@@ -20,8 +21,10 @@ use Illuminate\Support\Facades\Http;
  */
 class AiTeacherService
 {
-    public function __construct(private ContentExtractionService $extractor)
-    {
+    public function __construct(
+        private ContentExtractionService $extractor,
+        private NumericVerifier $numbers,
+    ) {
     }
 
     /**
@@ -162,6 +165,28 @@ class AiTeacherService
             $userMsg .= "\nالمطلوب: اشرح الدرس في نقاط مرقمة بسيطة.";
         }
 
+        $text = $this->callLlm($provider, $apiKey, $system, $userMsg, $user, $lesson, 'explain');
+        if ($text === null) {
+            return $this->fallback($ctx, 'تعذّر الاتصال بخدمة الشرح، وهذه نقاط الدرس من الكتاب:');
+        }
+
+        $explanation = array_values(array_filter(array_map('trim', preg_split('/\n+/', $text))));
+
+        return [
+            'explanation' => $explanation,
+            'pages' => $ctx['pages'],
+            'grounded' => true,
+            'provider' => $provider,
+        ];
+    }
+
+    /**
+     * Call the configured LLM chat endpoint and return the reply text, or null
+     * on failure. Usage is always logged. Kept in one place so every AI feature
+     * shares the same provider, timeout, and audit trail.
+     */
+    private function callLlm(string $provider, string $apiKey, string $system, string $userMsg, ?User $user, Lesson $lesson, string $feature): ?string
+    {
         try {
             $response = Http::withToken($apiKey)
                 ->timeout(config('platform.ai.timeout', 30))
@@ -174,35 +199,26 @@ class AiTeacherService
                     'temperature' => 0.2,
                 ]);
 
-            $this->logUsage($user, $lesson, $provider, $response);
+            $this->logUsage($user, $lesson, $provider, $response, $feature);
 
             if ($response->failed()) {
-                return $this->fallback($ctx, 'تعذّر الاتصال بخدمة الشرح، وهذه نقاط الدرس من الكتاب:');
+                return null;
             }
 
-            $text = (string) $response->json('choices.0.message.content');
-            $text = trim($text);
-            if ($text === '') {
-                return $this->fallback($ctx, 'لم يصل شرح، وهذه نقاط الدرس من الكتاب:');
-            }
-            $explanation = array_values(array_filter(array_map('trim', preg_split('/\n+/', $text))));
+            $text = trim((string) $response->json('choices.0.message.content'));
 
-            return [
-                'explanation' => $explanation,
-                'pages' => $ctx['pages'],
-                'grounded' => true,
-                'provider' => $provider,
-            ];
+            return $text === '' ? null : $text;
         } catch (\Throwable $e) {
             AiUsageLog::create([
                 'user_id' => $user?->id,
                 'lesson_id' => $lesson->id,
-                'feature' => 'explain',
+                'feature' => $feature,
                 'provider' => $provider,
                 'success' => false,
                 'error' => $e->getMessage(),
             ]);
-            return $this->fallback($ctx, 'حدث خطأ في خدمة الشرح، وهذه نقاط الدرس من الكتاب:');
+
+            return null;
         }
     }
 
@@ -216,13 +232,13 @@ class AiTeacherService
         ];
     }
 
-    private function logUsage(?User $user, Lesson $lesson, string $provider, $response): void
+    private function logUsage(?User $user, Lesson $lesson, string $provider, $response, string $feature = 'explain'): void
     {
         try {
             AiUsageLog::create([
                 'user_id' => $user?->id,
                 'lesson_id' => $lesson->id,
-                'feature' => 'explain',
+                'feature' => $feature,
                 'provider' => $provider,
                 'model' => config('platform.ai.model'),
                 'prompt_tokens' => (int) ($response->json('usage.prompt_tokens') ?? 0),
@@ -232,6 +248,251 @@ class AiTeacherService
         } catch (\Throwable) {
             // logging must never break the request
         }
+    }
+
+    /**
+     * Explain *how to solve* one exercise, grounded in the lesson source so a
+     * student can follow the reasoning step by step. This teaches the method;
+     * it is shown after an attempt or when the student explicitly asks for help,
+     * and it prefers the deterministic answer over anything the model recalls.
+     *
+     * @return array{steps: string[], answer?: string, source_page?: ?int, grounded: bool, provider: string, needs_content?: bool}
+     */
+    public function explainSolution(Exercise $exercise, ?User $user = null, int $readingAge = 8): array
+    {
+        $exercise->loadMissing(['options', 'lesson']);
+        $ctx = $this->retrieveContext($exercise->lesson);
+
+        // If a human has already set the reference solution, show exactly that —
+        // never the model's guess.
+        if (is_array($exercise->solution_steps) && ! empty($exercise->solution_steps)) {
+            return [
+                'steps' => $exercise->solution_steps,
+                'answer' => $exercise->answer,
+                'source_page' => $exercise->source_page,
+                'grounded' => true,
+                'provider' => 'source',
+            ];
+        }
+
+        // A numeric answer is computed, not generated, so correctness never
+        // depends on the model.
+        $computed = $exercise->answer !== null ? $this->numbers->evaluate((string) $exercise->answer) : null;
+
+        $provider = config('platform.ai.provider', 'none');
+        $apiKey = config('platform.ai.api_key');
+
+        if ($provider === 'none' || empty($apiKey)) {
+            $structured = $this->sourceStructuredSteps($exercise, $ctx);
+            if ($structured !== null) {
+                return $structured;
+            }
+            if (empty($ctx['source_text'])) {
+                return $this->needsContent($exercise);
+            }
+
+            return [
+                'steps' => ['حل هذا التمرين من كتاب المنهج اليمني يحتاج مراجعة المعلم.'],
+                'answer' => $exercise->answer,
+                'source_page' => $exercise->source_page,
+                'grounded' => true,
+                'provider' => 'source',
+            ];
+        }
+
+        $system = "أنت معلم يمني صبور يعلّم طالبًا في المرحلة الابتدائية كيف يحل التمرين خطوة بخطوة.\n"
+            . "قاعدة صارمة: استخدم (محتوى الدرس) المرفق فقط، ولا تضف أي معلومة من خارج الكتاب.\n"
+            . 'إن كان الجواب الصحيح معروفًا (' . ($exercise->answer !== null ? $exercise->answer : 'غير معروف') . ") فاجعل خطواتك تؤدي إليه.\n"
+            . "اكتب الخطوات جملًا قصيرة مرقمة، بلغة بسيطة مناسبة لعمر {$readingAge} سنوات، واذكر رقم صفحة الكتاب إن توفّر.\n"
+            . 'إذا لم يتوفر محتوى كافٍ للحل فاكتب بالضبط: «هذا السؤال يحتاج توضيحًا أو صورة أوضح من الكتاب.»';
+
+        $userMsg = "عنوان الدرس: {$exercise->lesson->title}\n"
+            . 'الصفحات: ' . implode(', ', $ctx['pages']) . "\n"
+            . "محتوى الدرس:\n" . ($ctx['source_text'] ?: 'لا يوجد محتوى مستخرج بعد.') . "\n\n"
+            . "السؤال: {$exercise->question}\n"
+            . 'نوعه: ' . $exercise->type;
+        if ($exercise->options->isNotEmpty()) {
+            $userMsg .= "\nالخيارات: " . $exercise->options->pluck('text')->implode(' | ');
+        }
+        if ($exercise->answer !== null) {
+            $userMsg .= "\nالجواب المرجعي (تحقق منه فقط): {$exercise->answer}";
+        }
+        $userMsg .= "\nالمطلوب: اشرح خطوات الحل خطوة بخطوة.";
+
+        $text = $this->callLlm($provider, $apiKey, $system, $userMsg, $user, $exercise->lesson, 'solution');
+        if ($text === null) {
+            $structured = $this->sourceStructuredSteps($exercise, $ctx);
+
+            return $structured ?? [
+                'steps' => ['تعذّر الاتصال بخدمة الشرح، وهذه نقاط الدرس: ' . implode(' ', $ctx['points'])],
+                'answer' => $exercise->answer,
+                'source_page' => $exercise->source_page,
+                'grounded' => true,
+                'provider' => 'source',
+            ];
+        }
+
+        $steps = array_values(array_filter(array_map('trim', preg_split('/\n+/', $text))));
+
+        return [
+            'steps' => $steps,
+            'answer' => $exercise->answer,
+            'source_page' => $exercise->source_page,
+            'grounded' => true,
+            'provider' => $provider,
+        ];
+    }
+
+    /**
+     * Offline, deterministic step construction for numeric exercises: the split
+     * of the expression and the verified result, so the platform still teaches
+     * a correct method with no LLM and no invented wording.
+     */
+    private function sourceStructuredSteps(Exercise $exercise, array $ctx): ?array
+    {
+        if (! in_array($exercise->type, ['numeric', 'step_by_step', 'true_false', 'mcq'], true)) {
+            return null;
+        }
+
+        $steps = [];
+        $computed = $exercise->answer !== null ? $this->numbers->evaluate((string) $exercise->answer) : null;
+
+        if ($computed !== null) {
+            $steps[] = 'نكتب المسألة ثم نجري العملية خطوة بخطوة.';
+            $steps[] = 'الناتج: ' . $this->numbers->normalizeDigits((string) $exercise->answer) . '.';
+        } elseif ($exercise->type === 'mcq') {
+            $correct = $exercise->options->firstWhere('is_correct', true);
+            if ($correct) {
+                $steps[] = 'الاختيار الصحيح هو: ' . $correct->text . '.';
+            }
+        }
+
+        if (empty($steps)) {
+            return null;
+        }
+
+        if (! empty($ctx['points'])) {
+            $steps[] = 'استند إلى نقاط الدرس: ' . $ctx['points'][0];
+        }
+
+        return [
+            'steps' => $steps,
+            'answer' => $exercise->answer,
+            'source_page' => $exercise->source_page,
+            'grounded' => true,
+            'provider' => 'source',
+        ];
+    }
+
+    private function needsContent(Exercise $exercise): array
+    {
+        return [
+            'steps' => ['هذا السؤال يحتاج محتوى الدرس أولًا. اطلب من مشرف المحتوى اعتماد الدرس، أو ارفع صورة أوضح من الكتاب.'],
+            'answer' => $exercise->answer,
+            'source_page' => $exercise->source_page,
+            'grounded' => true,
+            'provider' => 'none',
+            'needs_content' => true,
+        ];
+    }
+
+    /**
+     * Suggest a reference answer + solution steps + hint for an exercise, for a
+     * human reviewer to approve. The draft is NOT published: it is returned to
+     * the caller and only becomes visible to learners once approved. Numeric
+     * answers are computed deterministically and flagged for review.
+     *
+     * @return array{answer: ?string, solution_steps: string[], hint: ?string, needs_content: bool, provider: string, confidence: string}
+     */
+    public function draftSolution(Exercise $exercise, ?User $user = null): array
+    {
+        $exercise->loadMissing(['options', 'lesson']);
+        $ctx = $this->retrieveContext($exercise->lesson);
+
+        // An already-verifiable answer wins; we only supply missing pieces.
+        $answer = $exercise->answer;
+        $numeric = $answer !== null ? $this->numbers->evaluate((string) $answer) : null;
+        $needsContent = empty($ctx['source_text']) && $answer === null && $exercise->options->isEmpty();
+
+        $provider = config('platform.ai.provider', 'none');
+        $apiKey = config('platform.ai.api_key');
+        $steps = [];
+        $confidence = 'low';
+
+        if ($numeric !== null) {
+            // Computed answer: high confidence, still human-approved before publishing.
+            $answer = $this->numbers->normalizeDigits((string) $answer);
+            $steps[] = 'نحسب الناتج مباشرةً: ' . $answer . '.';
+            $confidence = 'high';
+        } elseif ($exercise->type === 'mcq') {
+            $correct = $exercise->options->firstWhere('is_correct', true);
+            if ($correct) {
+                $answer = $correct->label ?: $correct->text;
+                $steps[] = 'الاختيار الصحيح حسب الكتاب: ' . $correct->text . '.';
+                $confidence = 'medium';
+            }
+        }
+
+        if ($provider !== 'none' && ! empty($apiKey) && ! $needsContent) {
+            $system = "أنت معلم يمني خبير. اقترح حلًا مرجعيًا لتمرين من كتاب المنهج اليمني، اعتمادًا على (محتوى الدرس) المرفق فقط.\n"
+                . "لا تخترع أي معلومة من خارج المحتوى المرفق.\n"
+                . 'أعد الناتج بصيغة JSON فقط بالمفاتيح: {"answer": "...", "steps": ["...", "..."], "hint": "..."}. '
+                . "الخطوات قصيرة ومرقمة، والتلميح دفعة بسيطة دون كشف الجواب إن أمكن.\n"
+                . 'إن لم يتوفر محتوى كافٍ فاجعل "answer" = "" و "steps" = [].';
+
+            $userMsg = "عنوان الدرس: {$exercise->lesson->title}\n"
+                . "محتوى الدرس:\n" . $ctx['source_text'] . "\n\n"
+                . "السؤال: {$exercise->question}\n"
+                . 'نوعه: ' . $exercise->type;
+            if ($exercise->options->isNotEmpty()) {
+                $userMsg .= "\nالخيارات: " . $exercise->options->pluck('text')->implode(' | ');
+            }
+            if ($answer !== null) {
+                $userMsg .= "\nالجواب المحسوب (اعتمده إن كان صحيحًا): {$answer}";
+            }
+
+            $text = $this->callLlm($provider, $apiKey, $system, $userMsg, $user, $exercise->lesson, 'draft_solution');
+            $parsed = $this->parseJsonObject($text);
+            if ($parsed) {
+                if (! empty($parsed['answer']) && $numeric === null) {
+                    $answer = (string) $parsed['answer'];
+                }
+                $llmSteps = array_values(array_filter(array_map('trim', (array) ($parsed['steps'] ?? []))));
+                if ($llmSteps) {
+                    $steps = $llmSteps;
+                    $confidence = $numeric !== null ? 'high' : 'medium';
+                }
+                $hint = trim((string) ($parsed['hint'] ?? '')) ?: null;
+            }
+        }
+
+        $hint ??= $exercise->hint;
+
+        return [
+            'answer' => $answer,
+            'solution_steps' => $steps,
+            'hint' => $hint,
+            'needs_content' => $needsContent,
+            'provider' => $provider === 'none' || empty($apiKey) ? 'source' : $provider,
+            'confidence' => $confidence,
+        ];
+    }
+
+    /**
+     * Parse the first JSON object found in a model reply (tolerates code fences).
+     */
+    private function parseJsonObject(?string $text): ?array
+    {
+        if (! $text) {
+            return null;
+        }
+        if (preg_match('/\{.*\}/s', $text, $m)) {
+            $decoded = json_decode($m[0], true);
+
+            return is_array($decoded) ? $decoded : null;
+        }
+
+        return null;
     }
 
     /**
