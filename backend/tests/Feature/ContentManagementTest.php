@@ -56,6 +56,28 @@ class ContentManagementTest extends TestCase
         $this->assertSame(2, $textbook->lessons()->count());
     }
 
+    public function test_unit_only_book_segments_by_unit(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'رياضيات ابتدائي', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        $textbook->pages()->create(['page_number' => 4, 'extracted_text' => "الوحدة الأولى\nالأعداد من ١ إلى ١٠\nتمرين: عُدّ ثم اكتب\n"]);
+        $textbook->pages()->create(['page_number' => 5, 'extracted_text' => "أمثلة\n١ + ٢ = ٣\n"]);
+        $textbook->pages()->create(['page_number' => 6, 'extracted_text' => "الوحدة الثانية\nالجمع والطرح\n"]);
+        $textbook->pages()->create(['page_number' => 7, 'extracted_text' => "تدريبات\n٥ - ٢ = ٣\n"]);
+
+        $created = app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $this->assertSame(2, $created);
+
+        $lessons = $textbook->lessons()->orderBy('sort_order')->get();
+        $this->assertSame(4, $lessons[0]->page_from);
+        $this->assertSame(5, $lessons[0]->page_to);
+        $this->assertSame(6, $lessons[1]->page_from);
+        $this->assertSame(7, $lessons[1]->page_to);
+    }
+
     public function test_owner_can_create_textbook_and_lesson(): void
     {
         $subject = Subject::first();

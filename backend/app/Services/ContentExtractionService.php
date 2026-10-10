@@ -215,7 +215,6 @@ class ContentExtractionService
 
         $lessons = [];   // list of ['title','page_from','page_to','sections'=>[]]
         $current = null; // active lesson index
-        $unit = null;    // last seen unit heading, used as fallback title
 
         foreach ($pages as $page) {
             $lines = preg_split('/\r\n|\r|\n/', (string) $page->extracted_text);
@@ -230,8 +229,7 @@ class ContentExtractionService
 
             foreach ($lines as $line) {
                 if ($this->isUnitHeading($line)) {
-                    $unit = $line;
-                    continue;
+                    continue; // unit banners are section context, not lessons
                 }
                 if ($this->isLessonHeading($line)) {
                     $lessons[] = [
@@ -259,22 +257,11 @@ class ContentExtractionService
         // lesson with content.
         $lessons = array_values(array_filter($lessons, fn ($l) => ! empty($l['sections'])));
 
-        // If the edition never prints "الدرس" headings, fall back to one lesson
-        // per unit so the book is still navigable rather than empty.
-        if (empty($lessons) && $unit) {
-            foreach ($pages as $page) {
-                $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $page->extracted_text))));
-                $lessons[] = [
-                    'title' => 'الوحدة: ' . mb_substr($unit, 0, 100),
-                    'page_from' => $page->page_number,
-                    'page_to' => $page->page_number,
-                    'sections' => array_map(fn ($l) => [
-                        'type' => $this->guessSectionType($l),
-                        'content' => $l,
-                        'source_page' => $page->page_number,
-                    ], $lines),
-                ];
-            }
+        // Books with no "الدرس" (e.g. primary maths) still mark الوحدة/الفصل
+        // sections; group pages under those so the book stays navigable rather
+        // than becoming one meaningless lesson per page.
+        if (empty($lessons)) {
+            $lessons = $this->segmentByUnit($pages);
         }
 
         $textbook->lessons()->delete();
@@ -323,6 +310,66 @@ class ContentExtractionService
     private function isUnitHeading(string $line): bool
     {
         return (bool) preg_match('/^(الوحدة|الفصل)\b/u', $line);
+    }
+
+    /**
+     * Group pages under الوحدة/الفصل headings for books without per-lesson
+     * headings. Pages before the first heading form a "مقدمة" lesson; an orphan
+     * heading with no following pages is dropped.
+     *
+     * @param  \Illuminate\Support\Collection<int,TextbookPage>  $pages
+     * @return list<array{title:string,page_from:int,page_to:int,sections:list<array{type:string,content:string,source_page:int}>}>
+     */
+    private function segmentByUnit($pages): array
+    {
+        $units = []; // list of ['title','page_from','page_to','sections']
+        $current = null;
+
+        foreach ($pages as $page) {
+            $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $page->extracted_text))));
+            $headings = array_values(array_filter($lines, fn ($l) => $this->isUnitHeading($l)));
+
+            // A contents page lists several units at once; skip it so it cannot
+            // masquerade as a unit with no content.
+            if (count($headings) >= 3) {
+                continue;
+            }
+
+            $heading = $headings[0] ?? null;
+            $body = array_values(array_filter(
+                $lines,
+                fn ($l) => $heading === null || $l !== $heading,
+            ));
+
+            if ($heading !== null) {
+                $units[] = [
+                    'title' => 'الوحدة: ' . $this->cleanHeading($heading),
+                    'page_from' => $page->page_number,
+                    'page_to' => $page->page_number,
+                    'sections' => [],
+                ];
+                $current = count($units) - 1;
+            } elseif ($current === null) {
+                $units[] = [
+                    'title' => 'مقدمة الكتاب',
+                    'page_from' => $page->page_number,
+                    'page_to' => $page->page_number,
+                    'sections' => [],
+                ];
+                $current = count($units) - 1;
+            }
+
+            $units[$current]['page_to'] = $page->page_number;
+            foreach ($body as $line) {
+                $units[$current]['sections'][] = [
+                    'type' => $this->guessSectionType($line),
+                    'content' => $line,
+                    'source_page' => $page->page_number,
+                ];
+            }
+        }
+
+        return array_values(array_filter($units, fn ($u) => ! empty($u['sections'])));
     }
 
     private function guessSectionType(string $line): string
