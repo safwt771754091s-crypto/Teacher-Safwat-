@@ -20,6 +20,8 @@ class ImportTextbooks extends Command
     protected $signature = 'textbooks:import
         {manifest : Path to the JSON manifest}
         {--limit=0 : Import only the first N entries}
+        {--offset=0 : Skip the first N manifest entries (for sharding)}
+        {--count=0 : Process at most N entries after the offset (for sharding)}
         {--grade= : Only this grade level}
         {--authority= : Only entries with this authority (common|sanaa|aden)}
         {--tag-authority= : Force this authority on every imported book}
@@ -58,6 +60,11 @@ class ImportTextbooks extends Command
             unset($entry);
         }
 
+        $offset = max(0, (int) $this->option('offset'));
+        $count = max(0, (int) $this->option('count'));
+        $seen = 0;
+        $taken = 0;
+
         foreach ($manifest as $entry) {
             if ($onlyGrade && (int) ($entry['grade_level'] ?? 0) !== $onlyGrade) {
                 continue;
@@ -65,6 +72,15 @@ class ImportTextbooks extends Command
             if ($onlyAuthority && ($entry['authority'] ?? 'common') !== $onlyAuthority) {
                 continue;
             }
+            // Shard across records that pass the filters, so parallel workers
+            // each take a disjoint, deterministic slice of the same manifest.
+            if ($seen++ < $offset) {
+                continue;
+            }
+            if ($count && $taken >= $count) {
+                break;
+            }
+            $taken++;
             if ($limit && $done >= $limit) {
                 break;
             }
