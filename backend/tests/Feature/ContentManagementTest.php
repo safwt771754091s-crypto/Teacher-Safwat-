@@ -140,9 +140,14 @@ class ContentManagementTest extends TestCase
         $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
         $ex = $lesson->exercises()->first();
         $this->actingAs($this->owner(), 'sanctum')
-            ->postJson("/api/v1/exercises/{$ex->id}/verify", [])
+            ->postJson("/api/v1/exercises/{$ex->id}/verify", ['answer' => '١٠', 'hint' => 'اجمع العددين'])
             ->assertOk();
-        $this->assertDatabaseHas('exercises', ['id' => $ex->id, 'verified_by' => $this->owner()->id]);
+        $this->assertDatabaseHas('exercises', [
+            'id' => $ex->id,
+            'verified_by' => $this->owner()->id,
+            'answer' => '١٠',
+            'hint' => 'اجمع العددين',
+        ]);
     }
 
     public function test_owner_overview_and_ai_usage(): void

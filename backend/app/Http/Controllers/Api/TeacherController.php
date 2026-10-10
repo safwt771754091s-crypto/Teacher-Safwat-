@@ -184,13 +184,26 @@ class TeacherController extends Controller
 
     /**
      * Verify an exercise (a human confirms it matches the textbook).
+     *
+     * Imported drafts carry only the book's question; the reviewer supplies the
+     * reference answer here before the exercise can be answered by students.
      */
     public function verifyExercise(Request $request, Exercise $exercise)
     {
-        $exercise->update([
+        $data = $request->validate([
+            'answer' => ['nullable', 'string'],
+            'solution_steps' => ['nullable', 'array'],
+            'hint' => ['nullable', 'string'],
+        ]);
+
+        $exercise->update(array_filter([
+            'answer' => $data['answer'] ?? null,
+            'solution_steps' => $data['solution_steps'] ?? null,
+            'hint' => $data['hint'] ?? null,
             'verified_by' => $request->user()->id,
             'verified_at' => now(),
-        ]);
+        ], fn ($v) => ! is_null($v)));
+
         return response()->json(['exercise' => $exercise]);
     }
 
