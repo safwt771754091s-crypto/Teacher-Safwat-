@@ -20,6 +20,14 @@ class ContentManagementTest extends TestCase
         return User::where('email', 'owner@school.ye')->first();
     }
 
+    public function test_font_mojibake_is_treated_as_unreadable(): void
+    {
+        $extractor = app(\App\Services\ContentExtractionService::class);
+        $this->assertTrue($extractor->textIsReadable('الوحدة الأولى : تركيب المادة'));
+        $this->assertFalse($extractor->textIsReadable('≤ Z?UMLK UOKF« WM?K« ?UCŽ ?‰u?????'));
+        $this->assertFalse($extractor->textIsReadable('?‰u?????'));
+    }
+
     public function test_owner_can_create_textbook_and_lesson(): void
     {
         $subject = Subject::first();

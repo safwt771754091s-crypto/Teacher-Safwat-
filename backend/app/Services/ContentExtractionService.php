@@ -36,12 +36,13 @@ class ContentExtractionService
 
         $pageCount = max(count($textPages), $this->pdfPageCount($absolutePath));
 
-        // Only rasterise + OCR when the text layer is missing or too sparse;
-        // most digital editions already carry a good layer, so OCR would be a
-        // pure waste of time there.
-        $withText = count(array_filter($textPages, fn ($t) => $t !== ''));
+        // A nonempty text layer is not necessarily usable: many official editions
+        // embed subsetted fonts with a broken cmap, so getText() returns mojibake
+        // ("≤ Z?UMLK UOKF«") that contains almost no Arabic/Latin letters. Count
+        // only pages whose text is actually readable, and OCR when too few are.
+        $readable = count(array_filter($textPages, fn ($t) => $this->looksReadable($t)));
         $needsOcr = $this->ocrAvailable()
-            && ($pageCount === 0 || $withText < max(1, (int) floor($pageCount * 0.6)));
+            && ($pageCount === 0 || $readable < max(1, (int) floor($pageCount * 0.6)));
 
         $ocr = $needsOcr ? $this->ocrPdfPages($absolutePath) : [];
 
@@ -53,10 +54,12 @@ class ContentExtractionService
 
         $result = [];
         for ($number = 1; $number <= $pageCount; $number++) {
-            $text = $this->normalizeArabic($textPages[$number] ?? '');
-            if ($text === '' && isset($ocr[$number])) {
-                $text = $this->normalizeArabic($ocr[$number]);
-            }
+            $layer = $textPages[$number] ?? '';
+            // Prefer the text layer only when it is trustworthy; otherwise fall
+            // back to OCR of the same page.
+            $text = $this->looksReadable($layer)
+                ? $this->normalizeArabic($layer)
+                : $this->normalizeArabic($ocr[$number] ?? $layer);
             TextbookPage::updateOrCreate(
                 ['textbook_id' => $textbook->id, 'page_number' => $number],
                 ['extracted_text' => $text, 'status' => $text !== '' ? 'extracted' : 'raw'],
@@ -118,25 +121,31 @@ class ContentExtractionService
                 escapeshellarg($pattern),
             ));
 
-            // OCR sequentially: tesseract is memory/cache heavy, and running many
-            // workers concurrently on a throttled host is far slower than a serial
-            // loop (measured ~20x here).
-            $tess = escapeshellarg(config('platform.ocr.tesseract'));
-            $lang = escapeshellarg(config('platform.ocr.language'));
+            // tesseract is CPU bound, so a bounded worker pool uses spare cores
+            // without thrashing; each worker pins to one thread (OMP_THREAD_LIMIT)
+            // so N workers == N cores instead of N*4.
+            $workers = max(1, (int) config('platform.ocr.workers', 2));
+            $threads = max(1, (int) config('platform.ocr.threads', 1));
+            $script = $tmp . '/run.sh';
+            file_put_contents($script, sprintf(
+                "#!/bin/sh\nimg=\"\$1\"\nexport OMP_THREAD_LIMIT=%d\n%s \"\$img\" \"out_\$(basename \"\$img\" .png)\" -l %s 2>/dev/null\n",
+                $threads,
+                config('platform.ocr.tesseract'),
+                config('platform.ocr.language'),
+            ));
+            @shell_exec(sprintf(
+                'cd %s && ls page*.png 2>/dev/null | xargs -r -P %d -n1 sh %s',
+                escapeshellarg($tmp),
+                $workers,
+                escapeshellarg($script),
+            ));
+
             foreach (glob($tmp . '/page*.png') ?: [] as $img) {
                 if (! preg_match('/page-?(\d+)\.png$/', $img, $m)) {
                     continue;
                 }
                 $pageNo = (int) $m[1];
-                @shell_exec(sprintf(
-                    'cd %s && %s %s out_%d -l %s 2>/dev/null',
-                    escapeshellarg($tmp),
-                    $tess,
-                    escapeshellarg(basename($img)),
-                    $pageNo,
-                    $lang,
-                ));
-                $txt = $tmp . '/out_' . $pageNo . '.txt';
+                $txt = $tmp . '/out_' . basename($img, '.png') . '.txt';
                 $out[$pageNo] = is_file($txt) ? trim((string) file_get_contents($txt)) : '';
             }
         } finally {
@@ -255,11 +264,37 @@ class ContentExtractionService
         return 'point';
     }
 
-    public function normalizeArabic(string $text): string
+    public function normalizeArabic(?string $text): string
     {
+        $text = (string) $text;
         $text = str_replace(["\u{200B}", "\u{200E}", "\u{200F}", "\u{FEFF}"], '', $text);
         $text = preg_replace('/[ \t]+/u', ' ', $text);
         $text = preg_replace('/\n{3,}/u', "\n\n", $text);
-        return trim($text);
+        return trim((string) $text);
+    }
+
+    /**
+     * Decide whether extracted text is genuine reading material or font-encoding
+     * mojibake. Digital editions with a broken cmap yield long runs of exotic
+     * glyphs and almost no letters; OCR output always contains real letters, so
+     * this drives the "text layer vs OCR" choice without hardcoding any book.
+     */
+    public function textIsReadable(string $text): bool
+    {
+        return $this->looksReadable($text);
+    }
+
+    private function looksReadable(string $text): bool
+    {
+        $text = trim($text);
+        $len = mb_strlen($text);
+        if ($len < 2) {
+            return false;
+        }
+        // Genuine prose is dominated by Arabic letters or lowercase Latin (plus
+        // digits on maths pages). Broken-cmap output is instead uppercase-heavy
+        // with almost no lowercase, so excluding uppercase separates the two.
+        $meaningful = preg_match_all('/[\x{0600}-\x{06FF}a-z0-9]/u', $text);
+        return ($meaningful / $len) >= 0.35;
     }
 }

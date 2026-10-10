@@ -75,8 +75,13 @@ class ImportTextbooks extends Command
                 continue;
             }
 
-            // Resume: a book whose text was already extracted is not re-downloaded.
-            if ($textbook->pages()->whereNotNull('extracted_text')->where('extracted_text', '!=', '')->exists()) {
+            // Resume: skip only books whose pages hold *readable* text. A scanned
+            // book (or one left with font-mojibake) must be retried so OCR fills
+            // it in, so a plain non-empty count is not enough.
+            $pages = $textbook->pages()->pluck('extracted_text');
+            $readable = $pages->filter(fn ($t) => $extractor->textIsReadable((string) $t))->count();
+            $total = max(1, (int) $textbook->pages_count);
+            if ($readable > 0 && $readable >= (int) ceil($total * 0.6)) {
                 $this->line('↷ already ingested: ' . $textbook->title);
                 $done++;
                 continue;

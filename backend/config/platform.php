@@ -50,6 +50,8 @@ return [
         'pdftoppm' => env('OCR_PDFTOPPM', 'pdftoppm'),
         'language' => env('OCR_LANGUAGE', 'ara'),
         'dpi' => (int) env('OCR_DPI', 160),
+        'workers' => (int) env('OCR_WORKERS', 4),
+        'threads' => (int) env('OCR_THREADS', 1),
     ],
 
     'game' => [
