@@ -7,8 +7,14 @@
 > الصفحات، ثم تبني الشرح والتلخيص والأسئلة **اعتمادًا على مصدر الكتاب نفسه**، لا على
 > ذاكرة النموذج وحده.
 
-النموذج الحالي: **الصف الأول الأساسي** كمثال حقيقي كامل (رياضيات، لغتي الجميلة،
-العلوم، التربية الإسلامية)، مع بنية قابلة للتعميم على بقية الصفوف والمراحل.
+يغطي النظام اليوم **المنهج اليمني كاملًا**: الصفوف من الأول الأساسي إلى الثالث الثانوي
+(12 صفًا)، ومواد كل صف بأسمائها الرسمية. صفوف المرحلة الأساسية الأولى أُسست ببنية كاملة
+(دروس، نقاط، تمارين، ملخصات، صفحات مصدر)، وبقية الصفوف تُزرع من **فهرس المنهج الرسمي**
+كمنهج أولي قابل للتوسيع.
+
+> **ملاحظة مهمة**: محتوى الصفوف غير المؤلَّفة بعد يظهر كـ«محتوى هيكل أولي من فهرس المنهج»
+> مع ملاحظة ظاهرة داخل الدرس، ولا يُقدَّم كنص كتاب موثّق. عند رفع الطبعة الرسمية (PDF/صور)
+> واعتمادها بشريًا يستبدل المحتوى تلقائيًا عبر مسار الاستخراج والمراجعة.
 
 ---
 
@@ -105,7 +111,7 @@ API_PUBLIC_URL=https://api.example.ye bash scripts/run_demo.sh
 
 | الدور | البريد | كلمة المرور |
 |---|---|---|
-| المالك / الإدارة | `owner@school.ye` | `password` |
+| المالك / الإدارة (المعلم صفوت) | `owner@school.ye` | `password` |
 | معلم | `teacher@school.ye` | `password` |
 | ولي أمر | `parent@school.ye` | `password` |
 | طالب | `student@school.ye` | `password` |
@@ -167,5 +173,6 @@ exercise answer in the *actual textbook* (stored per page), rather than model me
 ships a Laravel 13 REST API (Sanctum roles: owner/admin/teacher/parent/student), a
 dependency-free responsive RTL web app, an exercise engine that verifies numeric answers
 by real arithmetic and reference answers (Arabic-Indic digits supported), gamification, an
-audio/read-aloud layer, and parent/teacher/owner dashboards. Grade-1 Yemeni curriculum is
-seeded as a real example. Run `bash scripts/bootstrap_env.sh` to start.
+audio/read-aloud layer, and parent/teacher/owner dashboards. The **entire Yemeni
+curriculum** (grades 1–12, all official subjects) is seeded. Platform owner/branding is
+configured via `config/platform.php` (owner = المعلم صفوت). Run `bash scripts/bootstrap_env.sh`.

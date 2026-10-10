@@ -4,9 +4,9 @@ return [
     'name' => 'معلمي الذكي اليمني',
 
     'owner' => [
-        'name' => env('PLATFORM_OWNER', 'المالك'),
-        'title' => env('PLATFORM_OWNER_TITLE', 'مؤسس المنصة'),
-        'email' => env('PLATFORM_OWNER_EMAIL', 'owner@example.com'),
+        'name' => env('PLATFORM_OWNER', 'المعلم صفوت'),
+        'title' => env('PLATFORM_OWNER_TITLE', 'معلم المنصة'),
+        'email' => env('PLATFORM_OWNER_EMAIL', 'teacher@safwat.ye'),
     ],
 
     /*

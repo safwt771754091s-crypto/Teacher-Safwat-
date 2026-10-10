@@ -44,4 +44,31 @@ class CurriculumTest extends TestCase
         $this->getJson("/api/v1/lessons/{$lesson->id}/pages/17")
             ->assertOk();
     }
+
+    public function test_every_grade_has_subjects_and_published_lessons(): void
+    {
+        foreach (Grade::all() as $grade) {
+            $subjects = $grade->subjects()->withCount('textbooks')->get();
+            $this->assertGreaterThanOrEqual(2, $subjects->count(), "grade {$grade->level} has too few subjects");
+
+            $lessons = Lesson::whereHas('textbook.subject', fn ($q) => $q->where('grade_id', $grade->id))
+                ->where('status', 'published')
+                ->count();
+            $this->assertGreaterThanOrEqual(4, $lessons, "grade {$grade->level} has too few lessons");
+        }
+    }
+
+    public function test_secondary_grade_subjects_are_browsable(): void
+    {
+        $grade10 = Grade::where('level', 10)->firstOrFail();
+        $res = $this->getJson("/api/v1/grades/{$grade10->id}/subjects")->assertOk();
+        $names = collect($res->json('subjects'))->pluck('name');
+        $this->assertTrue($names->contains('الفيزياء'));
+        $this->assertTrue($names->contains('الكيمياء'));
+
+        $physics = $grade10->subjects()->where('name', 'الفيزياء')->firstOrFail();
+        $book = $physics->textbooks()->firstOrFail();
+        $lessons = $this->getJson("/api/v1/textbooks/{$book->id}/lessons")->assertOk();
+        $this->assertNotEmpty($lessons->json('lessons'));
+    }
 }

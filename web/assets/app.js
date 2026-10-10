@@ -12,6 +12,22 @@
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const el = (id) => document.getElementById(id);
 
+    const platform = { owner: { name: 'المعلم صفوت', title: 'معلم المنصة' } };
+
+    function applyBranding() {
+        const nameEl = el('ownerName');
+        if (nameEl) nameEl.textContent = platform.owner.name;
+        const creditEl = el('ownerCredit');
+        if (creditEl) creditEl.textContent = platform.owner.name;
+    }
+
+    function loadConfig() {
+        return API.get('/config', { auth: false })
+            .then((d) => { if (d && d.owner) platform.owner = d.owner; })
+            .catch(() => {})
+            .then(applyBranding);
+    }
+
     function toast(msg, type) {
         toastEl.textContent = msg;
         toastEl.className = 'toast ' + (type || '');
@@ -37,6 +53,7 @@
         <section class="hero">
             <h1>معلّمي الذكي اليمني</h1>
             <p>معلم منزلي رقمي يشرح لك دروس كتاب المنهج اليمني، يلخّصها، يقرؤها بصوت، ويحلّ التمارين خطوة بخطوة — مع ألعاب تعليمية ممتعة.</p>
+            <p class="muted small">بإعداد المعلم <strong id="ownerCredit">المعلم صفوت</strong></p>
             <div class="hero-features">
                 <span>📖 شرح من الكتاب نفسه</span>
                 <span>🔊 استماع للدروس</span>
@@ -121,7 +138,7 @@
         el('navUser').textContent = u.name;
         el('navRole').textContent = (ROLES[u.role] || {}).label || u.role;
         el('brandSub').textContent = (ROLES[u.role] || {}).label || '';
-        el('ownerName').textContent = u.student_profile ? '' : '';
+        applyBranding();
         renderTabs();
         const route = (location.hash.replace('#/', '') || defaultRoute());
         routeTo(route);
@@ -766,9 +783,12 @@
     };
 
     // ---------------- Boot ----------------
-    if (state.token && state.user) {
-        API.get('/auth/me').then((d) => { state.user = d.user; showApp(); }).catch(() => authScreen());
-    } else {
-        authScreen();
-    }
+    applyBranding();
+    loadConfig().then(() => {
+        if (state.token && state.user) {
+            API.get('/auth/me').then((d) => { state.user = d.user; showApp(); }).catch(() => authScreen());
+        } else {
+            authScreen();
+        }
+    });
 })();

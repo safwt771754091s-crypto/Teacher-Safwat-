@@ -15,6 +15,16 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function () {
     Route::get('health', fn () => response()->json(['status' => 'ok', 'app' => config('app.name')]));
 
+    // Public platform metadata (branding shown before login).
+    Route::get('config', fn () => response()->json([
+        'app' => config('app.name'),
+        'platform' => config('platform.name'),
+        'owner' => [
+            'name' => config('platform.owner.name'),
+            'title' => config('platform.owner.title'),
+        ],
+    ]));
+
     Route::post('auth/register', [AuthController::class, 'register']);
     Route::post('auth/login', [AuthController::class, 'login']);
 
