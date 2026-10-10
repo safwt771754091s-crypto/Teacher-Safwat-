@@ -16,14 +16,18 @@ export PATH="/usr/local/bin:$PATH"
 need_apt=0
 command -v php >/dev/null 2>&1 || [ -x /usr/bin/php8.4 ] || need_apt=1
 command -v mariadbd >/dev/null 2>&1 || command -v mysqld >/dev/null 2>&1 || need_apt=1
+# OCR toolchain is required to read scanned Yemeni textbooks (no text layer).
+command -v tesseract >/dev/null 2>&1 || need_apt=1
+command -v pdftoppm >/dev/null 2>&1 || need_apt=1
 
 if [ "$need_apt" = "1" ]; then
     echo "Installing system packages..."
     sudo apt-get update -qq
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         php8.4-cli php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.4-bcmath \
-        php8.4-gd php8.4-intl php8.4-mysql php8.4-redis \
-        mariadb-server redis-server unzip curl git
+        php8.4-gd php8.4-intl php8.4-mysql php8.4-redis php8.4-sqlite3 \
+        mariadb-server redis-server unzip curl git \
+        tesseract-ocr tesseract-ocr-ara poppler-utils
     sudo ln -sf /usr/bin/php8.4 /usr/local/bin/php
 fi
 
@@ -56,3 +60,9 @@ fi
 php artisan config:clear >/dev/null 2>&1 || true
 
 bash "$ROOT/scripts/run_demo.sh"
+
+# Keep the demo alive across future sandbox resets.
+if ! pgrep -f "scripts/watchdog.sh" >/dev/null 2>&1; then
+    nohup bash "$ROOT/scripts/watchdog.sh" >/tmp/watchdog.log 2>&1 &
+    echo "Watchdog started (log: /tmp/watchdog.log)"
+fi
