@@ -74,6 +74,7 @@ Route::prefix('v1')->group(function () {
             Route::post('textbooks', [TeacherController::class, 'createTextbook']);
             Route::post('textbooks/{textbook}/upload-pdf', [TeacherController::class, 'uploadPdf']);
             Route::post('textbooks/{textbook}/upload-page', [TeacherController::class, 'uploadPage']);
+            Route::get('textbooks/{textbook}/pages', [TeacherController::class, 'pages']);
             Route::post('textbooks/{textbook}/draft-lessons', [TeacherController::class, 'draftLessons']);
             Route::post('textbooks/{textbook}/publish', [TeacherController::class, 'publishTextbook']);
             Route::patch('pages/{page}', [TeacherController::class, 'updatePage']);

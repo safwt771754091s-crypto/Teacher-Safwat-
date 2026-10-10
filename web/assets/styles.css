@@ -203,6 +203,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 .switch { display: flex; align-items: center; gap: 10px; }
 .switch input { width: auto; }
 .summary-draft { background: var(--green-light); }
+.badge.raw { background: #999; }
+.badge.extracted { background: var(--gold); }
+.badge.reviewed { background: var(--green); }
+.page-review { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+.page-row { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.page-head { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.page-text { width: 100%; font-family: inherit; font-size: .9rem; border-radius: 10px; border: 1px solid var(--line); padding: 10px; margin-bottom: 8px; }
 
 /* Desktop */
 @media (min-width: 900px) {

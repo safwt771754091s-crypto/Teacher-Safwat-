@@ -601,6 +601,7 @@
             <div class="ex-actions">
                 <button class="btn small" data-bact="upload-pdf" data-id="${t.id}">📤 رفع PDF</button>
                 <button class="btn small" data-bact="upload-page" data-id="${t.id}">🖼️ رفع صفحة</button>
+                <button class="btn small" data-bact="pages" data-id="${t.id}">📄 مراجعة الصفحات</button>
                 <button class="btn small" data-bact="draft-lessons" data-id="${t.id}">✂️ توليد مسودات الدروس</button>
                 <button class="btn small" data-bact="publish" data-id="${t.id}">✅ نشر</button>
                 <button class="btn small ghost" data-bact="lessons" data-id="${t.id}">📚 الدروس</button>
@@ -632,6 +633,8 @@
             inp.click();
         } else if (act === 'upload-page') {
             openPageUpload(id, card);
+        } else if (act === 'pages') {
+            openPagesReview(id, card);
         } else if (act === 'draft-lessons') {
             busy(true);
             API.post(`/textbooks/${id}/draft-lessons`, {}).then((r) => { toast(`تم إنشاء ${r.lessons_created} درس مسودة`); loadContentBooks(); }).catch((e) => toast(e.message, 'error')).finally(() => busy(false));
@@ -661,29 +664,60 @@
         };
     }
 
+    async function openPagesReview(bookId, card) {
+        busy(true);
+        const out = card.querySelector('.book-out');
+        try {
+            const d = await API.get(`/textbooks/${bookId}/pages`);
+            out.innerHTML = `<div class="card">
+                <strong>مراجعة الصفحات — ${esc(d.textbook.title)}</strong>
+                <div class="muted small">الإجمالي: ${d.counts.total} · خام: ${d.counts.raw} · مستخرج: ${d.counts.extracted} · مُراجَع: ${d.counts.reviewed}</div>
+                <ul class="page-review">${d.pages.map((p) => `
+                    <li class="page-row">
+                        <div class="page-head">صفحة ${p.page_number} <span class="badge ${p.status}">${({ raw: 'خام', extracted: 'مستخدَم/مستخرج', reviewed: 'مُراجَع' })[p.status] || p.status}</span></div>
+                        <textarea data-pg="${p.id}" rows="3" class="page-text">${esc(p.extracted_text || '')}</textarea>
+                        <button class="btn small primary" data-pgsave="${p.id}">حفظ كمراجَع</button>
+                    </li>`).join('') || '<li class="muted">لا توجد صفحات بعد. ارفع PDF أو صورًا أولًا.</li>'}</ul>
+            </div>`;
+            out.querySelectorAll('[data-pgsave]').forEach((b) => {
+                b.onclick = async () => {
+                    const ta = out.querySelector(`[data-pg="${b.dataset.pgsave}"]`);
+                    busy(true);
+                    try {
+                        await API.patch(`/pages/${b.dataset.pgsave}`, { extracted_text: ta.value, status: 'reviewed' });
+                        toast('تم حفظ الصفحة كمراجَعة');
+                    } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+                };
+            });
+        } catch (e) { toast(e.message, 'error'); }
+        busy(false);
+    }
+
     async function openLessonAdmin(bookId, card) {
         busy(true);
-        const d = await API.get(`/textbooks/${bookId}/lessons`, { auth: false });
         const out = card.querySelector('.book-out');
+        const d = await API.get(`/textbooks/${bookId}/lessons`, { auth: false });
         out.innerHTML = `<div class="lesson-admin">
             <div class="ask-row"><input id="nlTitle" placeholder="عنوان درس جديد"><button class="btn small primary" id="nlAdd">إضافة درس</button></div>
             <ul class="lesson-list">${d.lessons.map((l) => `<li class="lesson-item"><span class="lesson-title">${esc(l.title)}</span>
                 <button class="btn small ghost" data-sum="${l.id}">توليد ملخص</button></li>`).join('')}</ul>
+            <div class="summaries-out"></div>
         </div>`;
         el('nlAdd').onclick = async () => {
             busy(true);
             try { await API.post(`/textbooks/${bookId}/lessons`, { title: el('nlTitle').value }); toast('تمت الإضافة'); openLessonAdmin(bookId, card); }
             catch (e) { toast(e.message, 'error'); } finally { busy(false); }
         };
+        const summariesOut = out.querySelector('.summaries-out');
         out.querySelectorAll('[data-sum]').forEach((b) => {
             b.onclick = async () => {
                 busy(true);
                 try {
                     const { summary } = await API.post(`/lessons/${b.dataset.sum}/generate-summary`, {});
-                    out.querySelector('.book-out').insertAdjacentHTML('beforeend',
+                    summariesOut.insertAdjacentHTML('beforeend',
                         `<div class="card summary-draft"><strong>ملخص مسودة</strong><ul class="points">${(summary.points || []).map((p) => `<li class="pt">${esc(p)}</li>`).join('')}</ul>
                         <button class="btn small primary" data-approve="${summary.id}">اعتماد الملخص</button></div>`);
-                    out.querySelector(`[data-approve="${summary.id}"]`).onclick = async () => {
+                    summariesOut.querySelector(`[data-approve="${summary.id}"]`).onclick = async () => {
                         try { await API.post(`/summaries/${summary.id}/approve`, {}); toast('تم الاعتماد'); } catch (e) { toast(e.message, 'error'); }
                     };
                 } catch (e) { toast(e.message, 'error'); } finally { busy(false); }

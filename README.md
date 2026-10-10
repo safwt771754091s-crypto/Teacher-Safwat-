@@ -131,6 +131,8 @@ API_PUBLIC_URL=https://api.example.ye bash scripts/run_demo.sh
 | GET | `/games`، POST `/games/{id}/complete` | الألعاب والنتائج | طالب |
 | GET | `/progress`، `/achievements` | التقدم ونقاط الضعف | طالب |
 | GET | `/parent/dashboard`، POST `/parent/link-child` | متابعة الأبناء | ولي أمر |
+| GET | `/textbooks/{id}/pages` | عرض صفحات الكتاب وحالة كل صفحة (خام/مستخرج/مُراجَع) | معلم/مالك |
+| PATCH | `/pages/{id}` | تحرير نص الصفحة المستخرج واعتمادها | معلم/مالك |
 | POST | `/textbooks`، `/textbooks/{id}/upload-pdf`، `/upload-page`، `/draft-lessons`، `/publish`، `/lessons/{id}/generate-summary`، `/summaries/{id}/approve`، `/exercises/{id}/verify` | إدارة المحتوى | معلم/مالك |
 | GET | `/owner/overview`، `/owner/users`، `/owner/ai-usage`، POST `/owner/assign-role` | الإدارة | مالك |
 
@@ -161,7 +163,18 @@ cd backend && php artisan test
 - **المرحلة 3 — الصوت** ✅ (نص القراءة + النطق في الواجهة عبر Web Speech API).
 - **المرحلة 4 — ألعاب الابتدائي** ✅ (رياضيات/علوم/قراءة/تصنيف، مستويات، تغذية راجعة فورية).
 - **المرحلة 5 — الاختبار والنشر** 🔄: اختبارات آلية ✔، اختبار الصلاحيات ✔، يتبقى:
-  إدخال بقية كتب المنهج، ودمج محرك TTS عربي على الخادم، ونشر الإنتاج.
+  دمج محرك TTS عربي على الخادم، ونشر الإنتاج.
+
+### مسار استخراج الكتاب واعتماده (جاهز للاستخدام الآن)
+1. **إنشاء كتاب** لصف ومادة: `POST /textbooks`.
+2. **رفع المصدر**: PDF (`POST /textbooks/{id}/upload-pdf` — يستخرج النص لكل صفحة) أو صور
+   صفحات (`/upload-page`).
+3. **مراجعة الصفحات**: لوحة «مراجعة الصفحات» تعرض كل صفحة وحالتها، وتتيح تحرير النص
+   واعتماده (`GET /textbooks/{id}/pages` + `PATCH /pages/{id}`).
+4. **توليد مسودات الدروس** من الصفحات (`/draft-lessons`)، **توليد الملخص** واعتماده
+   (`/generate-summary` + `/summaries/{id}/approve`) الذي ينشر الدرس.
+5. **النشر**: `POST /textbooks/{id}/publish`.
+كل خطوة تحفظ رقم الصفحة المصدر، ولا يُقدَّم أي محتوى غير موجود في المصدر.
 
 ---
 

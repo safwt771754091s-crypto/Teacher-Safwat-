@@ -74,6 +74,27 @@ class TeacherController extends Controller
         return response()->json(['page' => $page], 201);
     }
 
+    /**
+     * List a textbook's pages so reviewers can inspect and correct extraction.
+     */
+    public function pages(Textbook $textbook)
+    {
+        $pages = $textbook->pages()
+            ->orderBy('page_number')
+            ->get(['id', 'page_number', 'extracted_text', 'image_path', 'status', 'review_note']);
+
+        return response()->json([
+            'textbook' => ['id' => $textbook->id, 'title' => $textbook->title, 'status' => $textbook->status],
+            'pages' => $pages,
+            'counts' => [
+                'total' => $pages->count(),
+                'raw' => $pages->where('status', 'raw')->count(),
+                'extracted' => $pages->where('status', 'extracted')->count(),
+                'reviewed' => $pages->where('status', 'reviewed')->count(),
+            ],
+        ]);
+    }
+
     public function updatePage(Request $request, TextbookPage $page)
     {
         $data = $request->validate([

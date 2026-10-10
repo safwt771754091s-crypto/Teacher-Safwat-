@@ -81,4 +81,36 @@ class ContentManagementTest extends TestCase
             ->assertOk()
             ->assertJsonStructure(['lessons']);
     }
+
+    public function test_owner_can_list_and_review_pages(): void
+    {
+        $book = Textbook::with('pages')->has('pages')->firstOrFail();
+        $page = $book->pages()->firstOrFail();
+
+        $this->actingAs($this->owner(), 'sanctum')
+            ->getJson("/api/v1/textbooks/{$book->id}/pages")
+            ->assertOk()
+            ->assertJsonStructure(['pages' => [['id', 'page_number', 'status']], 'counts' => ['total', 'raw', 'extracted', 'reviewed']]);
+
+        $this->actingAs($this->owner(), 'sanctum')
+            ->patchJson("/api/v1/pages/{$page->id}", [
+                'extracted_text' => 'نص مصحّح من الكتاب.',
+                'status' => 'reviewed',
+            ])->assertOk();
+
+        $this->assertDatabaseHas('textbook_pages', [
+            'id' => $page->id,
+            'status' => 'reviewed',
+            'extracted_text' => 'نص مصحّح من الكتاب.',
+        ]);
+    }
+
+    public function test_student_cannot_review_pages(): void
+    {
+        $book = Textbook::has('pages')->firstOrFail();
+        $student = User::where('email', 'student@school.ye')->first();
+        $this->actingAs($student, 'sanctum')
+            ->getJson("/api/v1/textbooks/{$book->id}/pages")
+            ->assertStatus(403);
+    }
 }
