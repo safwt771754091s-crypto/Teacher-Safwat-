@@ -1,0 +1,31 @@
+# Dependencies
+backend/vendor/
+node_modules/
+
+# Laravel runtime
+backend/storage/*.key
+backend/storage/framework/cache/data/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+backend/storage/logs/*
+backend/bootstrap/cache/*.php
+backend/public/storage
+
+# Env / secrets
+.env
+*/.env
+*.env.local
+
+# Build output
+backend/public/build
+web/build
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Tooling caches
+.openhands/
+.phpunit.result.cache
