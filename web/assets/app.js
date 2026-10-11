@@ -112,9 +112,9 @@
 
     // ---------------- Role helpers ----------------
     const ROLES = {
-        owner: { label: 'المالك / الإدارة', tabs: [['home', 'لوحتي'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
-        admin: { label: 'مشرف المحتوى', tabs: [['home', 'لوحتي'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
-        teacher: { label: 'معلم', tabs: [['home', 'لوحتي'], ['content', 'إدارة المحتوى'], ['profile', 'حسابي']] },
+        owner: { label: 'المالك / الإدارة', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
+        admin: { label: 'مشرف المحتوى', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
+        teacher: { label: 'معلم', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['profile', 'حسابي']] },
         parent: { label: 'ولي أمر', tabs: [['home', 'متابعة أبنائي'], ['profile', 'حسابي']] },
         student: { label: 'طالب', tabs: [['school', 'دروسي'], ['games', 'ألعابي'], ['progress', 'تقدمي'], ['profile', 'حسابي']] },
     };
@@ -775,7 +775,94 @@
         busy(false);
     }
 
-    // ---------------- Owner ----------------
+    // ---------------- AI agents dashboard ----------------
+    const AGENT_TARGET = {
+        'lesson-explainer': 'lesson',
+        'audio-narrator': 'lesson',
+        'exercise-solver': 'exercise',
+        'content-reviewer': 'lesson',
+    };
+
+    routes['agents'] = async function agentsScreen() {
+        busy(true);
+        try {
+            const [cat, tg] = await Promise.all([API.get('/agents'), API.get('/agents/targets')]);
+            const r = cat.readiness || {};
+            view.innerHTML = `<h2>🤖 وكلاء الذكاء الاصطناعي</h2>
+            <div class="card ${r.offline_ready ? '' : 'error'}">
+                <h3>جاهزية العمل بدون إنترنت</h3>
+                <p>${r.offline_ready ? '✅ المنصة تعمل كاملة بدون إنترنت.' : '⚠️ بعض الوكلاء يحتاج اتصالًا.'}
+                   الوكلاء: <b>${r.agents_total}</b> — تعمل بلا إنترنت: <b>${r.agents_offline}</b>
+                   — مزوّد السحابة: <b>${esc(r.cloud_provider || 'none')}</b> ${r.cloud_available ? '(متصل)' : '(غير مُفعّل)'}</p>
+            </div>
+            <div class="card"><h3>الوكلاء</h3><div id="agentsGrid" class="agents-grid"></div></div>
+            <div class="card"><h3>سجل التشغيل (آخر 50)</h3><div id="agentRuns"></div></div>`;
+
+            el('agentsGrid').innerHTML = (cat.agents || []).map((a) => {
+                const target = AGENT_TARGET[a.key];
+                let picker = '';
+                if (target === 'lesson') {
+                    picker = `<select data-target="${a.key}">${(tg.lessons || []).map((l) => `<option value="${l.id}">${esc(l.title)}</option>`).join('')}</select>`;
+                } else if (target === 'exercise') {
+                    picker = `<select data-target="${a.key}">${(tg.exercises || []).map((e) => `<option value="${e.id}">${esc(e.title)}</option>`).join('')}</select>`;
+                } else if (a.key === 'book-importer') {
+                    picker = `<input data-target="${a.key}" type="number" min="0" value="1" title="عدد الكتب" placeholder="عدد الكتب">`;
+                }
+                return `<div class="agent-card">
+                    <div class="agent-head"><b>${esc(a.name)}</b>
+                        <span class="chip">${a.offline_capable ? 'يعمل بدون إنترنت' : 'يحتاج اتصالًا'}</span></div>
+                    <p class="muted">${esc(a.purpose)}</p>
+                    <p class="muted small">تشغيلات: ${a.runs}</p>
+                    <div class="agent-run">
+                        ${picker}
+                        <button class="btn" data-run="${a.key}" data-target-type="${target || ''}">تشغيل</button>
+                    </div>
+                </div>`;
+            }).join('');
+
+            view.querySelectorAll('[data-run]').forEach((b) => {
+                b.onclick = () => runAgent(b.dataset.run, b.dataset.targetType);
+            });
+
+            await loadAgentRuns();
+        } catch (e) { view.innerHTML = `<div class="card error">تعذّر التحميل: ${esc(e.message)}</div>`; }
+        busy(false);
+    };
+
+    async function runAgent(key, targetType) {
+        busy(true);
+        try {
+            const sel = view.querySelector(`[data-target="${key}"]`);
+            const body = { params: {} };
+            if (sel && targetType) { body.subject_type = targetType; body.subject_id = Number(sel.value); }
+            if (key === 'book-importer' && sel) body.params.limit = Number(sel.value) || 1;
+            const d = await API.post(`/agents/${key}/run`, body);
+            const res = d.result || {};
+            if (res.status === 'needs_content') {
+                toast('الوكيل يحتاج محتوى معتمدًا: ' + ((res.output && res.output.reason) || ''), 'error');
+            } else if (res.status === 'error') {
+                toast('خطأ: ' + (res.error || ''), 'error');
+            } else {
+                toast(`تم التشغيل (${res.items} عنصر، ${res.offline ? 'بدون إنترنت' : 'سحابي'})`);
+            }
+            const out = view.querySelector(`[data-out="${key}"]`);
+            if (out) out.textContent = JSON.stringify(res.output, null, 2);
+            await loadAgentRuns();
+        } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+    }
+
+    async function loadAgentRuns() {
+        const area = el('agentRuns');
+        if (!area) return;
+        try {
+            const d = await API.get('/agents/runs');
+            area.innerHTML = `<table class="table"><thead><tr><th>الوكيل</th><th>الحالة</th><th>الوضع</th><th>عناصر</th><th>مدة (م.ث)</th><th>المستخدم</th></tr></thead><tbody>` +
+                (d.runs || []).map((x) => `<tr><td>${esc(x.agent_key)}</td><td>${esc(x.status)}</td>
+                    <td>${x.offline ? 'بدون إنترنت' : 'سحابي'}</td><td>${x.items}</td><td>${x.duration_ms}</td>
+                    <td>${esc(x.user || '-')}</td></tr>`).join('') + `</tbody></table>`;
+        } catch (e) { area.innerHTML = '<p class="muted">تعذّر تحميل السجل</p>'; }
+    }
+
     routes['owner'] = async function ownerScreen() {
         busy(true);
         const o = await API.get('/owner/overview');

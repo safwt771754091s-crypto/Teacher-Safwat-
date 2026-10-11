@@ -214,6 +214,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 .page-head { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .page-text { width: 100%; font-family: inherit; font-size: .9rem; border-radius: 10px; border: 1px solid var(--line); padding: 10px; margin-bottom: 8px; }
 
+/* AI agents dashboard */
+.agents-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.agent-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--bg); display: flex; flex-direction: column; gap: 6px; }
+.agent-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.agent-card .small { font-size: .78rem; }
+.agent-run { display: flex; gap: 8px; margin-top: auto; }
+.agent-run select, .agent-run input { flex: 1; min-width: 0; }
+
 /* Desktop */
 @media (min-width: 900px) {
     .tabbar { display: none !important; }

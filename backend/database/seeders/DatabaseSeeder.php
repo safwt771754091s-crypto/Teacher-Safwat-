@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
             CurriculumSeeder::class,
             FullCurriculumSeeder::class,
             UsersAndGamesSeeder::class,
+            AgentSeeder::class,
         ]);
     }
 }
