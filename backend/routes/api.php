@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AiTeacherController;
 use App\Http\Controllers\Api\AudioController;
 use App\Http\Controllers\Api\AuthController;
@@ -16,14 +17,19 @@ Route::prefix('v1')->group(function () {
     Route::get('health', fn () => response()->json(['status' => 'ok', 'app' => config('app.name')]));
 
     // Public platform metadata (branding shown before login).
-    Route::get('config', fn () => response()->json([
-        'app' => config('app.name'),
-        'platform' => config('platform.name'),
-        'owner' => [
-            'name' => config('platform.owner.name'),
-            'title' => config('platform.owner.title'),
-        ],
-    ]));
+    Route::get('config', function () {
+        $registry = app(\App\Agents\AgentRegistry::class);
+
+        return response()->json([
+            'app' => config('app.name'),
+            'platform' => config('platform.name'),
+            'owner' => [
+                'name' => config('platform.owner.name'),
+                'title' => config('platform.owner.title'),
+            ],
+            'offline' => $registry->offlineReadiness(),
+        ]);
+    });
 
     Route::post('auth/register', [AuthController::class, 'register']);
     Route::post('auth/login', [AuthController::class, 'login']);
@@ -41,6 +47,14 @@ Route::prefix('v1')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::post('parent/link-child', [AuthController::class, 'linkChild'])
             ->middleware('role:parent');
+
+        // AI agents: catalogue, run, and history. Staff-only agents are gated
+        // inside the controller; learner agents (explainer, solver, narrator)
+        // are open to any authenticated user.
+        Route::get('agents', [AgentController::class, 'index']);
+        Route::get('agents/targets', [AgentController::class, 'targets']);
+        Route::get('agents/runs', [AgentController::class, 'runs']);
+        Route::post('agents/{key}/run', [AgentController::class, 'run']);
 
         // AI teacher (any authenticated learner can ask about a lesson).
         Route::post('lessons/{lesson}/explain', [AiTeacherController::class, 'explain']);

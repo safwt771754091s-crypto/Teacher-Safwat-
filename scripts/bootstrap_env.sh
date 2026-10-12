@@ -52,9 +52,20 @@ cd "$BACKEND"
 [ -f vendor/autoload.php ] || composer install --no-interaction
 
 TABLES=$(sudo mariadb -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';")
-if [ "${FRESH:-0}" = "1" ] || [ "${TABLES:-0}" -lt 10 ]; then
-    echo "Seeding database..."
+if [ "${FRESH:-0}" = "1" ]; then
+    echo "Seeding database (FRESH)..."
     php artisan migrate:fresh --seed --force
+    bash "$ROOT/scripts/db_snapshot.sh" save || true
+elif [ "${TABLES:-0}" -lt 10 ]; then
+    # The sandbox wipe recreated an empty MariaDB. Prefer the last workspace
+    # snapshot (keeps imported textbooks + OCR pages) over a bare reseed.
+    if [ -s "$BACKEND/storage/app/db_snapshot.sql" ]; then
+        echo "Restoring database from workspace snapshot..."
+        bash "$ROOT/scripts/db_snapshot.sh" restore || php artisan migrate:fresh --seed --force
+    else
+        echo "Seeding database (no snapshot)..."
+        php artisan migrate:fresh --seed --force
+    fi
 fi
 
 php artisan config:clear >/dev/null 2>&1 || true

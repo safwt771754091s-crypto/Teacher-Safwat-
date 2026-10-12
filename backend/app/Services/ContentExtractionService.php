@@ -393,24 +393,16 @@ class ContentExtractionService
     {
         $lesson->loadMissing('sections');
 
-        $questions = [];
-        $seen = [];
+        // Gather the lesson's lines in reading order, keeping the source page so
+        // every surfaced question stays traceable to the textbook.
+        $lines = [];
         foreach ($lesson->sections as $section) {
-            foreach (preg_split('/\r\n|\r|\n/', (string) $section->content) as $line) {
-                $line = trim($line);
-                if ($line === '' || mb_strlen($line) > 120 || isset($seen[$line])) {
-                    continue;
-                }
-                if (! preg_match('/[\p{Arabic}]/u', $line)) {
-                    continue; // skip pure numbers/symbols (OCR noise on maths pages)
-                }
-                if (! preg_match('/^(?:[0-9\x{0660}-\x{0669}])?\s*(?:تمرين|تدريب|تدريبات|أجب|أكمل|اختر|صل|حل|سؤال|علل|استنتج|عدّ|عُدّ|اكتب|رتب|ضع)/u', $line)) {
-                    continue;
-                }
-                $seen[$line] = true;
-                $questions[] = [$line, $section->source_page];
+            foreach (preg_split('/\r\n|\r|\n/', (string) $section->content) as $raw) {
+                $lines[] = ['text' => trim($raw), 'page' => $section->source_page];
             }
         }
+
+        $questions = $this->extractQuestionBlocks($lines);
 
         if (empty($questions)) {
             return 0;
@@ -421,20 +413,145 @@ class ContentExtractionService
         $lesson->exercises()->where('is_draft', true)->delete();
 
         $created = 0;
-        foreach ($questions as $i => [$question, $page]) {
-            Exercise::create([
+        foreach ($questions as $i => $q) {
+            $exercise = Exercise::create([
                 'lesson_id' => $lesson->id,
-                'type' => 'short_answer',
-                'question' => $question,
+                'type' => $q['type'],
+                'question' => $q['question'],
                 'answer' => null,
-                'source_page' => $page,
+                'source_page' => $q['page'],
                 'sort_order' => $i,
                 'source' => 'textbook',
                 'is_draft' => true,
             ]);
+            foreach ($q['options'] as $j => $text) {
+                $exercise->options()->create([
+                    'label' => $this->optionLabel($text),
+                    'text' => $text,
+                    'is_correct' => false,
+                    'sort_order' => $j,
+                ]);
+            }
             $created++;
         }
         return $created;
+    }
+
+    /**
+     * Pull the textbook's own questions out of a lesson's OCR lines.
+     *
+     * Two shapes are recognised, both kept as *drafts* for a human to answer:
+     *  - an instruction line ("أجب عن الأسئلة الآتية:") starts a block; the
+     *    numbered questions that follow it are the real exercises.
+     *  - a standalone numbered question line (with or without a keyword).
+     * Multiple-choice options ("أ- ..." / "ب - ...") attach to the last question.
+     *
+     * @param  list<array{text:string,page:?int}>  $lines
+     * @return list<array{question:string,type:string,page:?int,options:list<string>}>
+     */
+    private function extractQuestionBlocks(array $lines): array
+    {
+        $isInstruction = fn (string $t): bool => (bool) preg_match(
+            '/^(?:تمرين|تدريب|تدريبات|أسئلة|أسئله|أنشطة|نشاط|أجب|أكمل|اختر|صل|حل|علل|استنتج|اكتب|رتب|ضع|عدّ|عُدّ)\b/u',
+            $t,
+        );
+        // A keyword line with no digits/equals/question mark is just a section
+        // header ("أجب عن الأسئلة الآتية:"); with content ("تمرين: اجمع ١+٢")
+        // it is itself the question.
+        $hasContent = fn (string $t): bool => (bool) preg_match('/[0-9\x{0660}-\x{0669}?؟=]/u', $t);
+        // Numbered question: leading Arabic/Latin digit (e.g. "١-", "3.", "٤ )").
+        $isNumbered = fn (string $t): bool => (bool) preg_match('/^[0-9\x{0660}-\x{0669}]+\s*[-).:\x{066B}\x{066C}]/u', $t);
+        $isOption = fn (string $t): bool => (bool) preg_match('/^(?:[أبجدهوزABCD])\s*[-–)]/u', $t);
+        $isNoise = fn (string $t): bool => mb_strlen($t) < 3
+            || mb_strlen($t) > 140
+            || ! preg_match('/[\p{Arabic}]/u', $t)
+            || (bool) preg_match('/https?:\/\/|www\./iu', $t);
+
+        $questions = [];
+        $seen = [];
+        $inBlock = false;
+        $current = -1;
+
+        foreach ($lines as $line) {
+            $text = $line['text'];
+            if ($text === '') {
+                continue;
+            }
+
+            if ($isInstruction($text) && mb_strlen($text) <= 60 && ! $hasContent($text)) {
+                // A bare section header — the real questions follow it.
+                $inBlock = true;
+                $current = -1;
+                continue;
+            }
+
+            if ($isInstruction($text) && ! $isNoise($text)) {
+                // A keyword line that carries the actual task ("تمرين: اجمع ١+٢").
+                if (! isset($seen[$text])) {
+                    $seen[$text] = true;
+                    $questions[] = [
+                        'question' => $text,
+                        'type' => $this->guessExerciseType($text),
+                        'page' => $line['page'],
+                        'options' => [],
+                    ];
+                    $current = count($questions) - 1;
+                }
+                $inBlock = true;
+                continue;
+            }
+
+            if ($isNumbered($text)) {
+                $body = trim(preg_replace('/^[0-9\x{0660}-\x{0669}]+\s*[-).:\x{066B}\x{066C}]+\s*/u', '', $text));
+                if ($isNoise($body)) {
+                    continue;
+                }
+                // A numbered line only counts as a question when we are inside an
+                // exercise block or the line itself asks something.
+                $asks = (bool) preg_match('/(?:\?|؟|ما|ماذا|كيف|لماذا|اذكر|عدد|بيّن|وضح|أكمل|اختر|أجب)/u', $body);
+                if (! $inBlock && ! $asks) {
+                    continue;
+                }
+                if (isset($seen[$body])) {
+                    continue;
+                }
+                $seen[$body] = true;
+                $questions[] = [
+                    'question' => $body,
+                    'type' => $this->guessExerciseType($body),
+                    'page' => $line['page'],
+                    'options' => [],
+                ];
+                $current = count($questions) - 1;
+                continue;
+            }
+
+            if ($isOption($text) && $current >= 0) {
+                $questions[$current]['options'][] = trim($text);
+                if ($questions[$current]['type'] === 'short_answer') {
+                    $questions[$current]['type'] = 'mcq';
+                }
+            }
+        }
+
+        return $questions;
+    }
+
+    private function optionLabel(string $text): ?string
+    {
+        return preg_match('/^\s*([أبجدهوزABCD])/u', $text, $m) ? $m[1] : null;
+    }
+
+    private function guessExerciseType(string $question): string
+    {
+        if (preg_match('/(?:اختر|أي من|الصحيح)/u', $question)) {
+            return 'mcq';
+        }
+        if (preg_match('/(?:صح|خطأ|صواب|هل )/u', $question)) {
+            return 'true_false';
+        }
+
+        return 'short_answer';
     }
 
     private function guessSectionType(string $line): string

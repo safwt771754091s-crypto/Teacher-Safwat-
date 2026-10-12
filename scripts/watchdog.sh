@@ -26,10 +26,18 @@ ports_down() {
 }
 
 echo "[watchdog] started $(date -Is); interval=${INTERVAL}s"
+tick=0
 while true; do
     if apt_busy; then
         sleep "$INTERVAL"
         continue
+    fi
+
+    # Refresh the workspace DB snapshot every ~10 minutes so a later reset
+    # restores the latest imported content instead of an older dump.
+    tick=$((tick + 1))
+    if [ $((tick % 10)) -eq 0 ]; then
+        bash "$ROOT/scripts/db_snapshot.sh" save >>/tmp/db_snapshot.log 2>&1 || true
     fi
 
     # Missing runtimes OR dead services both warrant a bootstrap.
@@ -43,7 +51,14 @@ while true; do
         echo "[watchdog] $(date -Is) services down -> restarting demo"
         sudo service mariadb start >/dev/null 2>&1 || true
         sudo service redis-server start >/dev/null 2>&1 || true
-        bash "$ROOT/scripts/run_demo.sh" >>/tmp/bootstrap.log 2>&1
+        # A reset can leave MariaDB running but empty; bootstrap restores the
+        # snapshot in that case (run_demo alone would leave login broken).
+        tables=$(sudo mariadb -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME:-teacher_safwat}';" 2>/dev/null || echo 0)
+        if [ "${tables:-0}" -lt 10 ]; then
+            bash "$ROOT/scripts/bootstrap_env.sh" >>/tmp/bootstrap.log 2>&1
+        else
+            bash "$ROOT/scripts/run_demo.sh" >>/tmp/bootstrap.log 2>&1
+        fi
     fi
 
     sleep "$INTERVAL"

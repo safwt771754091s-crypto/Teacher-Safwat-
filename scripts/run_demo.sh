@@ -16,7 +16,13 @@ if [ -z "$PHP_BIN" ]; then echo "PHP not found. Run scripts/bootstrap_env.sh fir
 
 API_PUBLIC="${API_PUBLIC_URL:-http://127.0.0.1:12000}"
 WEB_PUBLIC="${WEB_PUBLIC_URL:-http://127.0.0.1:12001}"
-printf "window.API_BASE_URL = '%s/api/v1';\n" "$API_PUBLIC" > "$WEB/assets/config.js"
+
+# Only (re)write the SPA API base when the caller explicitly sets a public URL
+# or the file is missing. Otherwise a committed config.js (e.g. the public demo
+# host) would be clobbered to localhost on every restart, breaking the link.
+if [ -n "${API_PUBLIC_URL:-}" ] || [ ! -f "$WEB/assets/config.js" ]; then
+    printf "window.API_BASE_URL = '%s/api/v1';\n" "$API_PUBLIC" > "$WEB/assets/config.js"
+fi
 
 pkill -f "artisan serve --host=0.0.0.0 --port=12000" 2>/dev/null || true
 pkill -f "php -S 0.0.0.0:12001" 2>/dev/null || true
