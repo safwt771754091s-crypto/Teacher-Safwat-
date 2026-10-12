@@ -85,19 +85,18 @@ class UsersAndGamesSeeder extends Seeder
         })->get();
         $firstMath = $mathLessons->first();
 
+        // Procedural math questions from the curriculum reference so every math
+        // game ships with a large, varied, self-answered question set.
+        $bank = app(\App\Services\MathQuestionBank::class);
+        $band = $bank->bandForGrade($grade1?->level ?? 1);
+
         $games = [
             ['title' => 'لعبة الأعداد الناقصة', 'type' => 'math', 'difficulty' => 1, 'points' => 10,
-                'config' => ['questions' => [
-                    ['q' => 'ما العدد بعد ٣؟', 'options' => ['٤', '٥', '٢'], 'answer' => '٤'],
-                    ['q' => 'ما العدد قبل ٦؟', 'options' => ['٥', '٧', '٤'], 'answer' => '٥'],
-                    ['q' => 'ما العدد بعد ٩؟', 'options' => ['١٠', '٨', '١١'], 'answer' => '١٠'],
-                ]]],
+                'config' => ['questions' => $bank->pool($band, 10)]],
             ['title' => 'لعبة الجمع السريع', 'type' => 'math', 'difficulty' => 2, 'points' => 15,
-                'config' => ['questions' => [
-                    ['q' => '٢ + ٣ = ؟', 'options' => ['٥', '٤', '٦'], 'answer' => '٥'],
-                    ['q' => '٤ + ١ = ؟', 'options' => ['٥', '٣', '٦'], 'answer' => '٥'],
-                    ['q' => '٥ + ٥ = ؟', 'options' => ['١٠', '٩', '١١'], 'answer' => '١٠'],
-                ]]],
+                'config' => ['questions' => $bank->pool($band, 12)]],
+            ['title' => 'تحدي الجدول والكسور', 'type' => 'math', 'difficulty' => 3, 'points' => 20,
+                'config' => ['questions' => $bank->pool('g4_6', 12)]],
             ['title' => 'صنّف: حي أم جماد؟', 'type' => 'sorting', 'difficulty' => 2, 'points' => 15,
                 'config' => ['questions' => [
                     ['q' => 'القطة', 'options' => ['كائن حي', 'جماد'], 'answer' => 'كائن حي'],
@@ -112,7 +111,8 @@ class UsersAndGamesSeeder extends Seeder
         ];
 
         foreach ($games as $g) {
-            GameActivity::firstOrCreate(
+            // updateOrCreate so re-seeding refreshes the generated question pools.
+            GameActivity::updateOrCreate(
                 ['title' => $g['title']],
                 $g + ['grade_id' => $grade1?->id, 'subject_id' => $mathSubject?->id, 'lesson_id' => $firstMath?->id],
             );
