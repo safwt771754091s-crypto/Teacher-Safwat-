@@ -462,13 +462,16 @@
                 <div class="play-opts">${q.options.map((o) => `<button class="btn" data-opt="${esc(o)}">${esc(o)}</button>`).join('')}</div>
                 <div id="playFb" class="muted"></div>`;
             el('modal').classList.remove('hidden');
+            speak(q.q);
             el('modalBody').querySelectorAll('[data-opt]').forEach((b) => {
                 b.onclick = () => {
                     const ok = b.dataset.opt === q.answer;
                     if (ok) correct++;
-                    el('playFb').innerHTML = ok ? '<span class="ok-text">✅ صحيح</span>' : `<span class="bad-text">❌ الصحيح: ${esc(q.answer)}</span>`;
-                    speak(ok ? 'صحيح' : 'حاول مرة أخرى');
-                    setTimeout(() => { idx++; renderQ(); }, 700);
+                    el('playFb').innerHTML = ok
+                        ? '<span class="ok-text">✅ أحسنت! إجابة صحيحة</span>'
+                        : `<span class="bad-text">❌ أخطأت، الإجابة الصحيحة: ${esc(q.answer)}</span>`;
+                    speak(ok ? 'أحسنت' : 'أخطأت، حاول مرة أخرى');
+                    setTimeout(() => { idx++; renderQ(); }, 900);
                 };
             });
         }

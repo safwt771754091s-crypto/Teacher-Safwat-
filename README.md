@@ -191,6 +191,39 @@ cd backend && php artisan test
 
 ---
 
+## النشر (الواجهة + الـ API)
+
+المنصة منشورة على جزأين:
+
+- **واجهة الويب** (موقع ثابت): GitHub Pages من فرع `gh-pages`
+  → <https://safwt771754091s-crypto.github.io/Teacher-Safwat-/>
+- **الـ API** (Laravel + قاعدة بيانات): خدمة دائمة عبر Docker على Render.
+
+### نشر الـ API دائمًا (Render)
+المستودع يحتوي `render.yaml` (Blueprint) و`backend/Dockerfile`. اضغط زر النشر ثم اربط
+المستودع؛ سيبني Render صورة Docker تثبّت PHP 8.4 وتمدّدات PDF، وتشغّل الترحيل والزرع
+تلقائيًا عند الإقلاع (`backend/docker/entrypoint.sh`). صحة الخدمة تُفحص على
+`/api/v1/health`.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+بعد ظهور رابط الخدمة (مثل `https://yemeni-smart-teacher-api.onrender.com`)، اضبطه في
+`web/assets/config.js` داخل الثابت `PROD_API_ORIGIN`، ثم أعِد نشر فرع `gh-pages`:
+
+```bash
+git worktree add --detach /tmp/ghpages
+cd /tmp/ghpages && git checkout --orphan gh-pages
+find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+cp -r /workspace/project/web/. .
+git add -A && git commit -m "deploy(web): point at permanent API" && git push origin gh-pages
+```
+
+> بديل: أي مستضيف Docker يدعم PHP (Railway / Fly.io / VPS). على خطة Render المجانية تنام
+> الخدمة بعد فترة خمول وتستيقظ عند أول طلب، وقاعدة SQLite مؤقتة — للتشغيل الجدّي استخدم
+> MySQL عبر متغيرات `DB_CONNECTION=mysql` و`DB_HOST/DB_DATABASE/DB_USERNAME/DB_PASSWORD`.
+
+---
+
 ## English summary
 
 **Yemeni Smart Teacher** is a curriculum-centric Arabic (RTL) learning platform. A student

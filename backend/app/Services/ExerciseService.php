@@ -55,7 +55,7 @@ class ExerciseService
 
         return [
             'is_correct' => (bool) $isCorrect,
-            'feedback' => $isCorrect ? 'أحسنت! الإجابة صحيحة.' : 'الإجابة غير صحيحة، حاول مرة أخرى أو اطلب تلميحًا.',
+            'feedback' => $isCorrect ? 'أحسنت! الإجابة صحيحة.' : 'أخطأت! الإجابة غير صحيحة، حاول مرة أخرى أو اطلب تلميحًا.',
             'steps' => $this->stepsFor($exercise),
             'expected' => $correct?->text,
         ];
@@ -70,7 +70,7 @@ class ExerciseService
             $isCorrect = abs($answer - $givenExpr) < 0.0001;
             return [
                 'is_correct' => $isCorrect,
-                'feedback' => $isCorrect ? 'أحسنت! الناتج صحيح.' : 'الناتج غير صحيح. راجع خطوات الحل ثم أعد المحاولة.',
+                'feedback' => $isCorrect ? 'أحسنت! الناتج صحيح.' : 'أخطأت! الناتج غير صحيح. راجع خطوات الحل ثم أعد المحاولة.',
                 'steps' => $this->stepsFor($exercise),
                 'expected' => (string) $exercise->answer,
             ];
@@ -86,7 +86,7 @@ class ExerciseService
 
         return [
             'is_correct' => $isCorrect,
-            'feedback' => $isCorrect ? 'أحسنت! الإجابة صحيحة.' : 'الإجابة لا تطابق إجابة الكتاب. راجع الدرس ثم أعد المحاولة.',
+            'feedback' => $isCorrect ? 'أحسنت! الإجابة صحيحة.' : 'أخطأت! الإجابة لا تطابق إجابة الكتاب. راجع الدرس ثم أعد المحاولة.',
             'steps' => $this->stepsFor($exercise),
             'expected' => (string) $exercise->answer,
         ];
