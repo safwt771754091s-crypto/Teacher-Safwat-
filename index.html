@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+    <title>معلمي الذكي اليمني — معلم منزلي رقمي للمنهج اليمني</title>
+    <meta name="description" content="منصة تعليمية يمنية: شرح الدروس من الكتاب المدرسي، تلخيص، صوت، حل التمارين خطوة بخطوة، وألعاب تعليمية للابتدائي.">
+    <meta name="theme-color" content="#2f6a43">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+    <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+    <div id="app" class="app">
+        <header class="topbar">
+            <button id="menuBtn" class="icon-btn" aria-label="القائمة">☰</button>
+            <div class="brand">
+                <span class="brand-logo">📚</span>
+                <div>
+                    <div class="brand-title">معلمي الذكي اليمني</div>
+                    <div class="brand-sub" id="brandSub">معلم منزلي رقمي للمنهج اليمني</div>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <span id="userChip" class="chip hidden"></span>
+                <button id="logoutBtn" class="icon-btn hidden" aria-label="خروج">⏏</button>
+            </div>
+        </header>
+
+        <nav id="sidenav" class="sidenav hidden">
+            <div class="sidenav-head">
+                <strong id="navUser">مرحبًا</strong>
+                <span id="navRole" class="muted"></span>
+            </div>
+            <ul id="navList"></ul>
+            <div class="sidenav-foot">
+                <span class="muted">المالك: <span id="ownerName"></span></span>
+            </div>
+        </nav>
+        <div id="overlay" class="overlay hidden"></div>
+
+        <main id="view" class="view"><!-- rendered by app.js --></main>
+
+        <nav id="tabbar" class="tabbar hidden"></nav>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <div id="modal" class="modal-wrap hidden"><div class="modal" id="modalBody"></div></div>
+
+    <script src="assets/config.js"></script>
+    <script src="assets/api.js"></script>
+    <script src="assets/app.js"></script>
+</body>
+</html>
