@@ -12,18 +12,28 @@
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const el = (id) => document.getElementById(id);
 
-    const platform = { owner: { name: 'المعلم صفوت', title: 'معلم المنصة' } };
+    const platform = {
+        owner: { name: 'المعلم صفوت', title: 'معلم المنصة' },
+        repo: { name: 'Teacher-Safwat-', url: 'https://github.com/safwt771754091s-crypto/Teacher-Safwat-' },
+    };
 
     function applyBranding() {
         const nameEl = el('ownerName');
         if (nameEl) nameEl.textContent = platform.owner.name;
         const creditEl = el('ownerCredit');
         if (creditEl) creditEl.textContent = platform.owner.name;
+        document.querySelectorAll('[data-repo-link]').forEach((a) => {
+            a.href = platform.repo.url;
+            a.textContent = platform.repo.name;
+        });
     }
 
     function loadConfig() {
         return API.get('/config', { auth: false })
-            .then((d) => { if (d && d.owner) platform.owner = d.owner; })
+            .then((d) => {
+                if (d && d.owner) platform.owner = d.owner;
+                if (d && d.repo) platform.repo = d.repo;
+            })
             .catch(() => {})
             .then(applyBranding);
     }
@@ -53,7 +63,7 @@
         <section class="hero">
             <h1>معلّمي الذكي اليمني</h1>
             <p>معلم منزلي رقمي يشرح لك دروس كتاب المنهج اليمني، يلخّصها، يقرؤها بصوت، ويحلّ التمارين خطوة بخطوة — مع ألعاب تعليمية ممتعة.</p>
-            <p class="muted small">بإعداد المعلم <strong id="ownerCredit">المعلم صفوت</strong></p>
+            <p class="muted small">بإعداد المعلم <strong id="ownerCredit">المعلم صفوت</strong> · المستودع: <a data-repo-link href="https://github.com/safwt771754091s-crypto/Teacher-Safwat-" target="_blank" rel="noopener">Teacher-Safwat-</a></p>
             <div class="hero-features">
                 <span>📖 شرح من الكتاب نفسه</span>
                 <span>🔊 استماع للدروس</span>
