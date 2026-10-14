@@ -222,6 +222,18 @@ class ContentManagementTest extends TestCase
         ]);
     }
 
+    public function test_footer_only_text_layer_counts_as_unreadable(): void
+    {
+        $extractor = app(\App\Services\ContentExtractionService::class);
+
+        // Scanned editions often expose only a footer URL as their text layer;
+        // that must not suppress OCR of the real page body.
+        $this->assertFalse($extractor->textIsReadable('http://Yaman.E-learning-moe.edu.ye'));
+        $this->assertFalse($extractor->textIsReadable('https://e-learning-moe.edu.ye +967771761429 https://t.me/Books_Yemen_new'));
+        // Genuine Arabic prose stays readable.
+        $this->assertTrue($extractor->textIsReadable('نتعلم الجمع حتى عشرة ونكتب الأعداد'));
+    }
+
     public function test_repeated_running_header_does_not_fork_lessons(): void
     {
         $subject = Subject::first();

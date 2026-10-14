@@ -839,13 +839,27 @@ class ContentExtractionService
     private function looksReadable(string $text): bool
     {
         $text = trim($text);
-        $len = mb_strlen($text);
-        if ($len < 2) {
+        if (mb_strlen($text) < 2) {
             return false;
         }
+
+        // Scanned editions often carry ONLY a footer (site URL, phone, Telegram
+        // link) as their text layer. That is boilerplate, not content, and must
+        // not mark the page readable - otherwise OCR of the real page body is
+        // skipped and the book looks empty. Strip those tokens and require
+        // something substantive to remain.
+        if (preg_match('/(https?:\/\/|www\.|t\.me\/|\S+@\S+|\.ye\b)/iu', $text)) {
+            $stripped = preg_replace('#(https?://\S+|www\.\S+|t\.me/\S+|\S+@\S+)#iu', ' ', $text) ?? $text;
+            $stripped = preg_replace('/[+\d\s\-_.|،؛:]+/u', ' ', $stripped) ?? $stripped;
+            if (mb_strlen(trim($stripped)) < 10) {
+                return false;
+            }
+        }
+
         // Genuine prose is dominated by Arabic letters or lowercase Latin (plus
         // digits on maths pages). Broken-cmap output is instead uppercase-heavy
         // with almost no lowercase, so excluding uppercase separates the two.
+        $len = mb_strlen($text);
         $meaningful = preg_match_all('/[\x{0600}-\x{06FF}a-z0-9]/u', $text);
         return ($meaningful / $len) >= 0.35;
     }
