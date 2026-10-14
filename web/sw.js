@@ -1,15 +1,17 @@
 /* معلمي الذكي اليمني — service worker.
  *
  * Makes the installed app lightweight and usable offline:
- *   - precaches the app shell (HTML/CSS/JS) so it opens with no network;
+ *   - keeps the app shell (HTML/CSS/JS) fresh via network-first with a cached
+ *     fallback, so a new deploy is picked up instead of being pinned by an old
+ *     cache-first worker;
  *   - caches curriculum API GETs (network-first) so lessons/exercises already
  *     viewed stay readable offline;
  *   - keeps books the user saved for offline in the "ts-books-v1" cache.
  * Book files themselves live in Supabase Storage and are pulled on demand, so
  * the app never ships the whole curriculum to every device.
  */
-const SHELL_CACHE = 'ts-shell-v3';
-const RUNTIME_CACHE = 'ts-runtime-v3';
+const SHELL_CACHE = 'ts-shell-v4';
+const RUNTIME_CACHE = 'ts-runtime-v4';
 const BOOKS_CACHE = 'ts-books-v1';
 const SHELL_ASSETS = [
     './',
@@ -21,6 +23,13 @@ const SHELL_ASSETS = [
     'assets/app.js',
     'assets/offline.js',
 ];
+
+// Cache keys ignore the ?v= cache-buster so the same asset is not stored twice.
+function cacheKey(request) {
+    const url = new URL(request.url);
+    url.search = '';
+    return url.href;
+}
 
 self.addEventListener('install', (event) => {
     event.waitUntil((async () => {
@@ -43,17 +52,18 @@ self.addEventListener('activate', (event) => {
 
 async function networkFirst(request, cacheNames, fallbackKey) {
     const names = Array.isArray(cacheNames) ? cacheNames : [cacheNames];
+    const key = cacheKey(request);
     try {
         const response = await fetch(request);
         if (response && response.ok) {
             const cache = await caches.open(names[0]);
-            cache.put(request, response.clone());
+            cache.put(key, response.clone());
         }
         return response;
     } catch (err) {
         for (const name of names) {
             const cache = await caches.open(name);
-            const cached = await cache.match(request);
+            const cached = (await cache.match(key)) || (await cache.match(request));
             if (cached) return cached;
         }
         if (fallbackKey) {
@@ -63,15 +73,6 @@ async function networkFirst(request, cacheNames, fallbackKey) {
         }
         throw err;
     }
-}
-
-async function cacheFirst(request) {
-    const cache = await caches.open(SHELL_CACHE);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    const response = await fetch(request);
-    if (response && response.ok) cache.put(request, response.clone());
-    return response;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -93,8 +94,9 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Same-origin static assets (shell): cache-first.
+    // Same-origin static assets (shell): network-first so a fresh deploy always
+    // wins, falling back to the cached copy when the network is unavailable.
     if (url.origin === self.location.origin) {
-        event.respondWith(cacheFirst(request));
+        event.respondWith(networkFirst(request, SHELL_CACHE));
     }
 });

@@ -21,6 +21,15 @@
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js').catch(() => {});
         });
+        // The worker calls skipWaiting() on install, so a new deploy activates
+        // as soon as it is detected. Reload once then, so the tab switches from
+        // an old cached bundle to the fresh one without the user clearing data.
+        let reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloading) return;
+            reloading = true;
+            window.location.reload();
+        });
     }
 
     // Fetch a URL and cache the response body under its own URL (same key the

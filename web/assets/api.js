@@ -58,7 +58,9 @@
                 clearSession();
                 if (onUnauthorized) onUnauthorized();
             }
-            const message = (data && (data.message || (data.errors && Object.values(data.errors)[0]?.[0])))
+            const firstError = data && data.errors ? Object.values(data.errors)[0] : null;
+            const message = (data && data.message)
+                || (firstError && firstError[0])
                 || (res.status >= 500 ? 'حدث خطأ في الخادم. حاول مرة أخرى بعد قليل.' : 'حدث خطأ');
             const err = new Error(message);
             err.status = res.status;
