@@ -64,9 +64,9 @@ class CurriculumController extends Controller
     public function downloadTextbook(Textbook $textbook, Request $request, TextbookExportService $export)
     {
         $textbook->loadMissing('subject.grade');
-        $name = trim(implode(' - ', array_filter([$textbook->subject?->grade?->name, $textbook->subject?->name, $textbook->title])));
+        $name = $textbook->title ?: 'textbook';
 
-        return $this->download(fn () => $export->textbookHtml($textbook), $export, $request, $name ?: 'textbook');
+        return $this->download(fn () => $export->textbookHtml($textbook), $export, $request, $name);
     }
 
     /**
