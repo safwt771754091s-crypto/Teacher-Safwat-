@@ -238,3 +238,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
     .auth-grid { grid-template-columns: 1fr; }
     .progress-list .progress-item { grid-template-columns: 1fr; }
 }
+
+/* Boot / connection states */
+.boot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 80px 20px; color: var(--muted); text-align: center; }
+.boot-spinner { width: 42px; height: 42px; border-radius: 50%; border: 4px solid var(--line); border-top-color: var(--green); animation: bootspin .9s linear infinite; }
+@keyframes bootspin { to { transform: rotate(360deg); } }
+.offline-card { max-width: 520px; margin: 40px auto; text-align: center; }
+.offline-card .btn { margin-top: 10px; }

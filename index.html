@@ -6,6 +6,9 @@
     <title>معلمي الذكي اليمني — معلم منزلي رقمي للمنهج اليمني</title>
     <meta name="description" content="منصة تعليمية يمنية: شرح الدروس من الكتاب المدرسي، تلخيص، صوت، حل التمارين خطوة بخطوة، وألعاب تعليمية للابتدائي.">
     <meta name="theme-color" content="#2f6a43">
+    <!-- Public API origin. Set this to the deployed Laravel host when the site
+         is served from a fixed origin; config.js also resolves it at runtime. -->
+    <meta name="api-base" content="">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
     <link rel="stylesheet" href="assets/styles.css">
@@ -40,7 +43,12 @@
         </nav>
         <div id="overlay" class="overlay hidden"></div>
 
-        <main id="view" class="view"><!-- rendered by app.js --></main>
+        <main id="view" class="view">
+            <div class="boot" id="boot">
+                <div class="boot-spinner" aria-hidden="true"></div>
+                <p>جارٍ التحميل…</p>
+            </div>
+        </main>
 
         <nav id="tabbar" class="tabbar hidden"></nav>
     </div>
