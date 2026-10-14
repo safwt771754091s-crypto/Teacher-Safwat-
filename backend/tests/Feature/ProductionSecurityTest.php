@@ -38,7 +38,8 @@ class ProductionSecurityTest extends TestCase
         $this->assertSame(0, User::whereIn('email', $demoEmails)->count());
         $this->assertSame(0, User::count());
         // Games and achievements are content, not accounts, so they are still seeded.
-        $this->assertDatabaseCount('game_activities', 5);
+        // Games are seeded per subject (all grades), plus the shared demo games.
+        $this->assertGreaterThanOrEqual(5, \App\Models\GameActivity::count());
         $this->assertDatabaseCount('achievements', 4);
     }
 
