@@ -119,22 +119,29 @@
 
         el('loginForm').onsubmit = async (e) => {
             e.preventDefault(); busy(true);
-            const f = new FormData(e.target);
             try {
-                const d = await API.post('/auth/login', Object.fromEntries(f), { auth: false });
+                const d = await API.post('/auth/login', formToObject(e.target), { auth: false });
                 API.setSession(d.user, d.token);
                 await showApp();
             } catch (err) { toast(err.message, 'error'); } finally { busy(false); }
         };
         el('registerForm').onsubmit = async (e) => {
             e.preventDefault(); busy(true);
-            const f = Object.fromEntries(new FormData(e.target));
+            const f = formToObject(e.target);
             try {
                 const d = await API.post('/auth/register', f, { auth: false });
                 API.setSession(d.user, d.token);
                 await showApp();
             } catch (err) { toast(err.message, 'error'); } finally { busy(false); }
         };
+    }
+
+    // FormData -> plain object without Object.fromEntries (ES2019), which is
+    // missing on some older phones still in use in the target market.
+    function formToObject(form) {
+        const out = {};
+        new FormData(form).forEach((v, k) => { out[k] = v; });
+        return out;
     }
 
     // ---------------- Role helpers ----------------
@@ -183,6 +190,7 @@
     const routes = {};
     function routeTo(route) {
         closeNav();
+        stopSpeaking();
         markActive(route);
         view.scrollTo(0, 0);
         const lessonMatch = /^lesson\/(\d+)/.exec(route);
@@ -294,7 +302,7 @@
             d.lessons.map((l) => `<li><a href="#/lesson/${l.id}" class="lesson-item">
                 <span class="lesson-no">${l.sort_order}</span>
                 <span class="lesson-title">${esc(l.title)}</span>
-                <span class="muted small">ص ${l.page_from ?? ''}${l.page_to && l.page_to !== l.page_from ? '-' + l.page_to : ''}</span>
+                <span class="muted small">ص ${l.page_from == null ? '' : l.page_from}${l.page_to && l.page_to !== l.page_from ? '-' + l.page_to : ''}</span>
             </a></li>`).join('') + `</ul>`;
         el('lessonsArea').scrollIntoView({ behavior: 'smooth' });
         busy(false);
@@ -310,7 +318,7 @@
         <div class="crumbs"><a href="#/school">دروسي</a> › <span>${esc(lesson.title)}</span></div>
         <div class="lesson-head">
             <h2>${esc(lesson.title)}</h2>
-            <span class="muted small">${esc(lesson.textbook.subject.name)} — ص ${lesson.page_from ?? ''}</span>
+            <span class="muted small">${esc(lesson.textbook.subject.name)} — ص ${lesson.page_from == null ? '' : lesson.page_from}</span>
         </div>
 
         <div class="action-row">
@@ -471,25 +479,74 @@
 
     // ---------------- Speech ----------------
     let voiceEnabled = true;
+    let voiceWarned = false;
+
+    // Voice lists load asynchronously on Chrome; keep the latest set and pick the
+    // best voice for the language (an exact match, else any voice for that locale).
+    let voices = [];
+    function loadVoices() {
+        if (!('speechSynthesis' in window)) return;
+        voices = speechSynthesis.getVoices() || [];
+    }
+    if ('speechSynthesis' in window) {
+        loadVoices();
+        speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    }
+
+    function pickVoice(lang) {
+        if (!voices.length) loadVoices();
+        const base = lang.split('-')[0];
+        return voices.find((v) => v.lang && v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase())
+            || voices.find((v) => v.lang && v.lang.toLowerCase().startsWith(base))
+            || null;
+    }
+
+    // Some devices (notably without an Arabic TTS voice installed) cannot read
+    // Arabic aloud. Surface that instead of failing silently.
+    function warnNoVoice(lang) {
+        if (voiceWarned) return;
+        voiceWarned = true;
+        toast(lang.startsWith('ar')
+            ? 'لا يوجد صوت عربي مثبّت على هذا الجهاز. ثبّت حزمة «تحويل النص إلى كلام» بالعربية من إعدادات الجهاز للاستماع للشرح.'
+            : 'No speech voice available on this device.');
+    }
+
     function speak(text) {
         if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
         try {
             speechSynthesis.cancel();
             // Split into bilingual chunks so English words are read in English
-            // and the Arabic explanation/translation in Arabic.
+            // and the Arabic explanation/translation in Arabic. A NUL marker is
+            // inserted at sentence/dash/newline boundaries instead of using a
+            // regex lookbehind, which is a syntax error on older Safari/WebView.
             const chunks = String(text)
-                .split(/(?<=[.!?؟،])\s+|\s+—\s+|\n+/)
+                .replace(/([.!?؟،])\s+/g, '$1\u0000')
+                .replace(/\s+—\s+|\n+/g, '\u0000')
+                .split('\u0000')
                 .map((s) => s.trim())
                 .filter(Boolean);
             (chunks.length ? chunks : [String(text)]).forEach((chunk) => {
                 const latin = (chunk.match(/[A-Za-z]/g) || []).length;
                 const arabic = (chunk.match(/[\u0600-\u06FF]/g) || []).length;
+                const lang = latin > 0 && latin >= arabic ? 'en-US' : 'ar-SA';
                 const u = new SpeechSynthesisUtterance(chunk);
-                u.lang = latin > 0 && latin >= arabic ? 'en-US' : 'ar-SA';
+                const voice = pickVoice(lang);
+                if (voice) u.voice = voice;
+                u.lang = lang;
                 u.rate = 0.95;
                 speechSynthesis.speak(u);
             });
+            // If voices are known but none is Arabic, the device cannot read the
+            // Arabic explanation — tell the user rather than staying silent.
+            if (voices.length && chunks.some((c) => (c.match(/[\u0600-\u06FF]/g) || []).length > 0) && !pickVoice('ar-SA')) {
+                warnNoVoice('ar-SA');
+            }
         } catch (e) {}
+    }
+
+    // Stop any speech currently playing (used by the audio toggle / navigation).
+    function stopSpeaking() {
+        if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch (e) {} }
     }
 
     function startVoiceAsk(lessonId) {

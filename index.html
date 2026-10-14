@@ -11,7 +11,10 @@
     <meta name="api-base" content="">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
-    <link rel="stylesheet" href="assets/styles.css">
+    <!-- BUILD is bumped on every deploy. It also versions the shell asset URLs
+         so a device stuck on an older cache-first service worker fetches the
+         new files (a new URL is never in its cache) instead of serving stale JS. -->
+    <link rel="stylesheet" href="assets/styles.css?v=5">
 </head>
 <body>
     <div id="app" class="app">
@@ -57,10 +60,10 @@
     <div id="toast" class="toast hidden"></div>
     <div id="modal" class="modal-wrap hidden"><div class="modal" id="modalBody"></div></div>
 
-    <script src="assets/config.js"></script>
-    <script src="assets/api.js"></script>
-    <script src="assets/offline.js"></script>
-    <script src="assets/app.js"></script>
+    <script src="assets/config.js?v=5"></script>
+    <script src="assets/api.js?v=5"></script>
+    <script src="assets/offline.js?v=5"></script>
+    <script src="assets/app.js?v=5"></script>
     <script>window.Offline && window.Offline.registerServiceWorker();</script>
 </body>
 </html>
