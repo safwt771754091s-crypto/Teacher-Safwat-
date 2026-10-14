@@ -24,14 +24,20 @@ class TextbookExportService
     /**
      * Render one textbook (all lessons: explanation, summary, exercises).
      */
-    public function textbookHtml(Textbook $textbook): string
+    public function textbookHtml(Textbook $textbook, bool $includePages = true): string
     {
         $textbook->loadMissing(['subject.grade', 'lessons']);
+        if ($includePages) {
+            $textbook->loadMissing('pages');
+        } else {
+            $textbook->setRelation('pages', collect());
+        }
 
         $body = '';
         foreach ($textbook->lessons as $lesson) {
             $body .= $this->lessonHtml($lesson);
         }
+        $body .= $this->bookPagesHtml($textbook);
 
         $subject = $textbook->subject;
         $grade = $subject?->grade;
@@ -48,9 +54,14 @@ class TextbookExportService
     /**
      * Render an entire grade: every subject's textbooks concatenated.
      */
-    public function gradeHtml(Grade $grade): string
+    public function gradeHtml(Grade $grade, bool $includePages = true): string
     {
         $grade->loadMissing('subjects.textbooks.lessons');
+        if ($includePages) {
+            $grade->loadMissing('subjects.textbooks.pages');
+        } else {
+            $grade->subjects->each(fn ($s) => $s->textbooks->each(fn ($b) => $b->setRelation('pages', collect())));
+        }
 
         $body = '';
         $toc = '';
@@ -61,6 +72,7 @@ class TextbookExportService
                 foreach ($book->lessons as $lesson) {
                     $body .= $this->lessonHtml($lesson);
                 }
+                $body .= $this->bookPagesHtml($book);
             }
         }
 
@@ -156,6 +168,27 @@ class TextbookExportService
         return $html . '</section>';
     }
 
+    /**
+     * The textbook's own pages: the verbatim extracted text (the real book
+     * content), with each page's number. Empty when no PDF/images were uploaded
+     * yet, so the export never fabricates book text.
+     */
+    private function bookPagesHtml(Textbook $textbook): string
+    {
+        $pages = $textbook->pages->filter(fn ($p) => trim((string) $p->extracted_text) !== '');
+        if ($pages->isEmpty()) {
+            return '';
+        }
+
+        $html = '<section class="book-text"><h2>نصّ الكتاب</h2>';
+        foreach ($pages as $page) {
+            $html .= '<article class="page"><span class="pageno">صفحة ' . (int) $page->page_number . '</span>'
+                . '<div class="page-body">' . nl2br(e($page->extracted_text)) . '</div></article>';
+        }
+
+        return $html . '</section>';
+    }
+
     private function toc(iterable $lessons): string
     {
         $out = '';
@@ -215,6 +248,11 @@ class TextbookExportService
             . '.options li{display:inline-block;margin:2px 0 2px 10px;padding:2px 10px;border:1px solid #cbd2d9;border-radius:14px;font-size:12px;}'
             . '.options li.correct{border-color:#2f6a43;background:#e8f3e8;color:#2f6a43;font-weight:bold;}'
             . '.answer{color:#2f6a43;font-weight:bold;margin:4px 0;}'
-            . '.steps{margin:4px 0;font-size:12px;}';
+            . '.steps{margin:4px 0;font-size:12px;}'
+            . '.book-text{margin-top:20px;}'
+            . '.book-text h2{color:#2f6a43;border-top:2px solid #2f6a43;padding-top:10px;}'
+            . '.page{margin:10px 0;padding:10px 14px;background:#fbfaf6;border:1px solid #ece7d8;border-radius:8px;}'
+            . '.page .pageno{display:inline-block;background:#2f6a43;color:#fff;border-radius:12px;padding:1px 10px;font-size:11px;margin-bottom:6px;}'
+            . '.page-body{font-size:13px;line-height:2;}';
     }
 }

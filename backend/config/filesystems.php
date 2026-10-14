@@ -60,6 +60,25 @@ return [
             'report' => false,
         ],
 
+        /*
+         * Supabase Storage (S3-compatible). Textbook PDFs/images live in a
+         * Supabase bucket so every app instance (and the offline PWA) can pull
+         * them from one place. Set TEXTBOOK_DISK=supabase in production and
+         * provide the S3 credentials + bucket in the environment.
+         */
+        'supabase' => [
+            'driver' => 's3',
+            'key' => env('SUPABASE_S3_ACCESS_KEY_ID'),
+            'secret' => env('SUPABASE_S3_SECRET_ACCESS_KEY'),
+            'region' => env('SUPABASE_S3_REGION', env('SUPABASE_REGION', 'ap-south-1')),
+            'bucket' => env('SUPABASE_S3_BUCKET', 'textbooks'),
+            'endpoint' => env('SUPABASE_S3_ENDPOINT', 'https://'.env('SUPABASE_PROJECT_REF', 'jsrpfsybgeplciiqjzqr').'.storage.supabase.co/storage/v1/s3'),
+            'use_path_style_endpoint' => true,
+            'visibility' => 'public',
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*

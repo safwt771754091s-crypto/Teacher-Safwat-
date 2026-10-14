@@ -7,6 +7,7 @@ use App\Models\Lesson;
 use App\Models\LessonSection;
 use App\Models\Textbook;
 use App\Models\TextbookPage;
+use Illuminate\Support\Facades\Storage;
 use Smalot\PdfParser\Parser;
 
 /**
@@ -177,6 +178,37 @@ class ContentExtractionService
     }
 
     /**
+     * Resolve a stored file to a real local path, downloading it to a temp file
+     * when the disk is remote (e.g. Supabase/S3). The callback receives the path;
+     * any temp copy is always removed afterwards.
+     */
+    public function withLocalFile(string $storedPath, callable $fn)
+    {
+        $disk = Storage::disk(config('platform.storage.textbook_disk', 'public'));
+        $temp = null;
+
+        try {
+            $path = $disk->path($storedPath);
+        } catch (\Throwable $e) {
+            $path = '';
+        }
+
+        if ($path === '' || ! is_file($path)) {
+            $temp = tempnam(sys_get_temp_dir(), 'tbk_');
+            file_put_contents($temp, (string) $disk->get($storedPath));
+            $path = $temp;
+        }
+
+        try {
+            return $fn($path);
+        } finally {
+            if ($temp && is_file($temp)) {
+                @unlink($temp);
+            }
+        }
+    }
+
+    /**
      * Store an uploaded page image. When no text is supplied, Arabic OCR is
      * attempted; regardless, the image is preserved as the source of record so
      * no content is guessed and a human can always confirm or correct it.
@@ -184,8 +216,7 @@ class ContentExtractionService
     public function storeImagePage(Textbook $textbook, int $pageNumber, string $imagePath, ?string $text = null): TextbookPage
     {
         if ($text === null || $text === '') {
-            $absolute = Storage::disk(config('platform.storage.textbook_disk', 'public'))->path($imagePath);
-            $text = $this->ocrImage($absolute) ?: null;
+            $text = $this->withLocalFile($imagePath, fn ($absolute) => $this->ocrImage($absolute)) ?: null;
         }
 
         return TextbookPage::updateOrCreate(

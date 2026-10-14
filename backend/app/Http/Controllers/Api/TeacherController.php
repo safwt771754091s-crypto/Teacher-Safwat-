@@ -50,7 +50,7 @@ class TeacherController extends Controller
             'source_type' => 'pdf',
         ]);
 
-        $pages = $this->extractor->extractPdf(Storage::disk(config('platform.storage.textbook_disk', 'public'))->path($path), $textbook);
+        $pages = $this->extractor->withLocalFile($path, fn ($absolute) => $this->extractor->extractPdf($absolute, $textbook));
         $textbook->update(['source_type' => 'pdf', 'pages_count' => count($pages)]);
 
         return response()->json([
@@ -79,9 +79,15 @@ class TeacherController extends Controller
      */
     public function pages(Textbook $textbook)
     {
+        $disk = Storage::disk(config('platform.storage.textbook_disk', 'public'));
         $pages = $textbook->pages()
             ->orderBy('page_number')
-            ->get(['id', 'page_number', 'extracted_text', 'image_path', 'status', 'review_note']);
+            ->get(['id', 'page_number', 'extracted_text', 'image_path', 'status', 'review_note'])
+            ->map(function ($page) use ($disk) {
+                $page->image_url = $page->image_path ? $disk->url($page->image_path) : null;
+
+                return $page;
+            });
 
         return response()->json([
             'textbook' => ['id' => $textbook->id, 'title' => $textbook->title, 'status' => $textbook->status],

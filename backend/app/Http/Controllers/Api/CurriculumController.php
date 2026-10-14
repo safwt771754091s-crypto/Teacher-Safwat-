@@ -65,8 +65,9 @@ class CurriculumController extends Controller
     {
         $textbook->loadMissing('subject.grade');
         $name = $textbook->title ?: 'textbook';
+        $pages = $this->includePages($request);
 
-        return $this->download(fn () => $export->textbookHtml($textbook), $export, $request, $name);
+        return $this->download(fn () => $export->textbookHtml($textbook, $pages), $export, $request, $name);
     }
 
     /**
@@ -74,7 +75,14 @@ class CurriculumController extends Controller
      */
     public function downloadGrade(Grade $grade, Request $request, TextbookExportService $export)
     {
-        return $this->download(fn () => $export->gradeHtml($grade), $export, $request, $grade->name);
+        $pages = $this->includePages($request);
+
+        return $this->download(fn () => $export->gradeHtml($grade, $pages), $export, $request, $grade->name);
+    }
+
+    private function includePages(Request $request): bool
+    {
+        return $request->query('pages', '1') !== '0';
     }
 
     private function download(callable $htmlFactory, TextbookExportService $export, Request $request, string $name)

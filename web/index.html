@@ -25,6 +25,7 @@
                 </div>
             </div>
             <div class="topbar-actions">
+                <span id="netChip" class="chip offline-chip hidden">بدون إنترنت</span>
                 <span id="userChip" class="chip hidden"></span>
                 <button id="logoutBtn" class="icon-btn hidden" aria-label="خروج">⏏</button>
             </div>
@@ -58,6 +59,8 @@
 
     <script src="assets/config.js"></script>
     <script src="assets/api.js"></script>
+    <script src="assets/offline.js"></script>
     <script src="assets/app.js"></script>
+    <script>window.Offline && window.Offline.registerServiceWorker();</script>
 </body>
 </html>

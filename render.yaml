@@ -41,6 +41,14 @@ services:
         value: المعلم صفوت
       - key: PLATFORM_REPO_URL
         value: https://github.com/safwt771754091s-crypto/Teacher-Safwat-
+      # Textbook files in Supabase Storage (S3 protocol); the app pulls them on
+      # demand so no device bundles the whole curriculum.
+      - key: TEXTBOOK_DISK
+        value: supabase
+      - key: SUPABASE_S3_BUCKET
+        value: textbooks
+      - key: SUPABASE_S3_REGION
+        value: ap-south-1
       # --- Secrets: set these in the Render dashboard (sync: false) ---
       - key: APP_KEY
         sync: false
@@ -51,6 +59,10 @@ services:
       - key: OWNER_PASSWORD
         sync: false
       - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SUPABASE_S3_SECRET_ACCESS_KEY
         sync: false
       # Optional: connect the grounded AI teacher to an OpenAI-compatible LLM.
       - key: LLM_PROVIDER

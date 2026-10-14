@@ -74,3 +74,5 @@ jobs:
           node --check web/assets/app.js
           node --check web/assets/api.js
           node --check web/assets/config.js
+          node --check web/assets/offline.js
+          node --check web/sw.js
