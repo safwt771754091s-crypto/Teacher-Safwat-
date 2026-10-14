@@ -9,6 +9,11 @@ return [
         'email' => env('PLATFORM_OWNER_EMAIL', 'teacher@safwat.ye'),
     ],
 
+    'repo' => [
+        'name' => env('PLATFORM_REPO', 'Teacher-Safwat-'),
+        'url' => env('PLATFORM_REPO_URL', 'https://github.com/safwt771754091s-crypto/Teacher-Safwat-'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Grounded AI teacher

@@ -27,6 +27,10 @@ Route::prefix('v1')->group(function () {
                 'name' => config('platform.owner.name'),
                 'title' => config('platform.owner.title'),
             ],
+            'repo' => [
+                'name' => config('platform.repo.name'),
+                'url' => config('platform.repo.url'),
+            ],
             'offline' => $registry->offlineReadiness(),
         ]);
     });
