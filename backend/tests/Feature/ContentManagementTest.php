@@ -222,6 +222,102 @@ class ContentManagementTest extends TestCase
         ]);
     }
 
+    public function test_footer_only_text_layer_counts_as_unreadable(): void
+    {
+        $extractor = app(\App\Services\ContentExtractionService::class);
+
+        // Scanned editions often expose only a footer URL as their text layer;
+        // that must not suppress OCR of the real page body.
+        $this->assertFalse($extractor->textIsReadable('http://Yaman.E-learning-moe.edu.ye'));
+        $this->assertFalse($extractor->textIsReadable('https://e-learning-moe.edu.ye +967771761429 https://t.me/Books_Yemen_new'));
+        // Genuine Arabic prose stays readable.
+        $this->assertTrue($extractor->textIsReadable('نتعلم الجمع حتى عشرة ونكتب الأعداد'));
+    }
+
+    public function test_repeated_running_header_does_not_fork_lessons(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب رأس مكرر', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        // The same heading printed at the top of consecutive pages is a running
+        // header, not a new lesson.
+        $textbook->pages()->create(['page_number' => 2, 'extracted_text' => "الدرس الأول : الجمع
+نتعلم الجمع
+"]);
+        $textbook->pages()->create(['page_number' => 3, 'extracted_text' => "الدرس الأول : الجمع
+تمارين على الجمع
+"]);
+
+        $created = app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $this->assertSame(1, $created);
+        $lesson = $textbook->lessons()->first();
+        $this->assertSame(2, $lesson->page_from);
+        $this->assertSame(3, $lesson->page_to);
+    }
+
+    public function test_running_footer_and_debris_are_not_lesson_content(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب تذييل', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        $footer = 'http://Yaman.E-learning-moe.edu.ye';
+        foreach ([2, 3, 4] as $n) {
+            $textbook->pages()->create(['page_number' => $n, 'extracted_text' => "الدرس الأول : القراءة
+" . $footer . "
+"]);
+        }
+
+        app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $lesson = $textbook->lessons()->first();
+        $contents = $lesson->sections()->pluck('content')->all();
+        foreach ($contents as $line) {
+            $this->assertStringNotContainsString('E-learning-moe', $line);
+        }
+    }
+
+    public function test_heading_ocr_debris_is_stripped(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب عنوان ملغوم', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        $textbook->pages()->create(['page_number' => 2, 'extracted_text' => "الدرس الأول : الجمع ممم 60060000000
+نتعلم الجمع
+"]);
+
+        app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $title = $textbook->lessons()->first()->title;
+        $this->assertStringNotContainsString('60060000000', $title);
+        $this->assertStringNotContainsString('ممم', $title);
+        $this->assertStringStartsWith('الدرس الأول', $title);
+    }
+
+    public function test_activity_only_book_falls_back_to_page_ranges(): void
+    {
+        $subject = Subject::first();
+        $textbook = Textbook::create([
+            'subject_id' => $subject->id, 'title' => 'كتاب نشاط', 'term' => 'first',
+            'source_type' => 'pdf', 'status' => 'review',
+        ]);
+        // No درس/وحدة headings at all, and long enough that a real book would
+        // not be one lesson.
+        for ($n = 1; $n <= 24; $n++) {
+            $textbook->pages()->create(['page_number' => $n, 'extracted_text' => "نشاط رقم {$n}\nأكتب الأعداد حتى {$n} ثم أرسمها\n"]);
+        }
+
+        $created = app(\App\Services\ContentExtractionService::class)->draftLessonsFromPages($textbook);
+        $this->assertGreaterThan(1, $created);
+        $titles = $textbook->lessons()->pluck('title')->all();
+        foreach ($titles as $title) {
+            $this->assertStringStartsWith('صفحات', $title);
+        }
+    }
+
     public function test_student_cannot_review_pages(): void
     {
         $book = Textbook::has('pages')->firstOrFail();

@@ -27,12 +27,28 @@ class ImportTextbooks extends Command
         {--tag-authority= : Force this authority on every imported book}
         {--no-ocr : Disable OCR (text layer only)}
         {--draft-lessons : Draft lessons after extraction}
-        {--keep-files : Keep the downloaded PDFs}';
+        {--keep-files : Keep the downloaded PDFs}
+        {--force : Re-extract even when the book already has readable text}';
 
     protected $description = 'Download and ingest a manifest of official Yemeni textbook PDFs';
 
     /** @var list<string> */
     private array $failures = [];
+
+    /**
+     * Manifest subject name => the canonical subject name seeded for the grade.
+     * Used only to avoid duplicate subjects; an unknown name is created as-is.
+     *
+     * @var array<string,string>
+     */
+    private const SUBJECT_ALIASES = [
+        'اللغة العربية' => 'لغتي الجميلة (العربية)',
+        'اللغة العربية (لغتي الجميلة)' => 'لغتي الجميلة (العربية)',
+        'لغتي الجميلة' => 'لغتي الجميلة (العربية)',
+        'الحاسوب' => 'مهارات الحاسوب',
+        'الفلسفة وعلم النفس' => 'الفلسفة',
+        'التربية الوطنية' => 'المواطنة',
+    ];
 
     public function handle(ContentExtractionService $extractor): int
     {
@@ -97,7 +113,7 @@ class ImportTextbooks extends Command
             $pages = $textbook->pages()->pluck('extracted_text');
             $readable = $pages->filter(fn ($t) => $extractor->textIsReadable((string) $t))->count();
             $total = max(1, (int) $textbook->pages_count);
-            if ($readable > 0 && $readable >= (int) ceil($total * 0.6)) {
+            if (! $this->option('force') && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
                 $this->line('↷ already ingested: ' . $textbook->title);
                 $done++;
                 continue;
@@ -154,7 +170,7 @@ class ImportTextbooks extends Command
         }
 
         $subject = Subject::firstOrCreate(
-            ['grade_id' => $grade->id, 'name' => $entry['subject']],
+            ['grade_id' => $grade->id, 'name' => $this->resolveSubjectName($grade->id, (string) $entry['subject'])],
             ['icon' => 'book', 'color' => '#2f6a43', 'sort_order' => 99, 'is_active' => true],
         );
 
@@ -170,6 +186,45 @@ class ImportTextbooks extends Command
                 'status' => 'review',
             ],
         );
+    }
+
+    /**
+     * Map a manifest subject name onto the name already seeded for that grade so
+     * an import never forks a second subject row for the same school subject
+     * (e.g. the manifest says «اللغة العربية» while grades 1–3 seed
+     * «لغتي الجميلة (العربية)»).
+     */
+    private function resolveSubjectName(int $gradeId, string $manifestName): string
+    {
+        $existing = Subject::where('grade_id', $gradeId)->pluck('name')->all();
+        $normalized = $this->normalizeSubject($manifestName);
+
+        foreach ($existing as $name) {
+            if ($this->normalizeSubject($name) === $normalized) {
+                return $name;
+            }
+        }
+
+        foreach (self::SUBJECT_ALIASES as $alias => $canonical) {
+            if ($this->normalizeSubject($alias) !== $normalized) {
+                continue;
+            }
+            foreach ($existing as $name) {
+                if ($this->normalizeSubject($name) === $this->normalizeSubject($canonical)) {
+                    return $name;
+                }
+            }
+        }
+
+        return $manifestName;
+    }
+
+    private function normalizeSubject(string $name): string
+    {
+        $name = preg_replace('/\([^)]*\)/u', ' ', $name) ?? $name;
+        $name = preg_replace('/\s+/u', ' ', $name) ?? $name;
+
+        return trim($name);
     }
 
     private function download(string $url, string $dir, int $attempts = 1): ?string
