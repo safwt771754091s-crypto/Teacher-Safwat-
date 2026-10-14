@@ -50,6 +50,18 @@
         toast._t = setTimeout(() => toastEl.classList.add('hidden'), 3200);
     }
 
+    // Online/offline indicator: the installed app keeps working offline, so the
+    // user should know when it is serving saved content instead of the network.
+    function applyNetworkBadge() {
+        const chip = el('netChip');
+        if (!chip) return;
+        const off = !navigator.onLine;
+        chip.textContent = off ? 'بدون إنترنت' : '';
+        chip.classList.toggle('hidden', !off);
+    }
+    window.addEventListener('online', applyNetworkBadge);
+    window.addEventListener('offline', applyNetworkBadge);
+
     function busy(on) {
         document.body.classList.toggle('loading', !!on);
     }
@@ -220,9 +232,13 @@
 
     async function loadBooks(subjectId) {
         busy(true);
+        state.currentSubject = subjectId;
+        state.currentGrade = state.user && state.user.student_profile ? state.user.student_profile.grade_id : null;
         const { textbooks } = await API.get(`/subjects/${subjectId}/textbooks`, { auth: false });
         const area = el('booksArea');
-        area.innerHTML = `<h3>الكتب</h3><div class="grid cards">` + textbooks.map((t) => `
+        area.innerHTML = `<h3>الكتب</h3><div class="grid cards">` + textbooks.map((t) => {
+            const saved = window.Offline && window.Offline.isSaved(t.id);
+            return `
             <div class="card">
                 <strong>${esc(t.title)}</strong>
                 <span class="muted small">الفصل ${t.term === 'first' ? 'الأول' : 'الثاني'} · ${t.lessons_count} درس · ${authorityLabel(t.authority)}</span>
@@ -230,13 +246,45 @@
                     <button class="btn small" data-book="${t.id}">فتح الدروس</button>
                     <a class="btn small" href="${API.API_BASE}/textbooks/${t.id}/download?format=pdf" download>⬇️ تحميل الكتاب كامل</a>
                     <a class="btn small" href="${API.API_BASE}/textbooks/${t.id}/download?format=html" download>⬇️ نسخة بدون إنترنت</a>
+                    <button class="btn small ${saved ? 'primary' : ''}" data-save="${t.id}">${saved ? '✅ محفوظ بدون إنترنت' : '📥 حفظ بدون إنترنت'}</button>
                 </div>
-            </div>`).join('') + `</div><div id="lessonsArea"></div>`;
+            </div>`;
+        }).join('') + `</div><div id="lessonsArea"></div>`;
         area.scrollIntoView({ behavior: 'smooth' });
         document.querySelectorAll('[data-book]').forEach((b) => {
             b.onclick = () => loadLessons(b.dataset.book);
         });
+        document.querySelectorAll('[data-save]').forEach((b) => {
+            b.onclick = () => saveBookOffline(b);
+        });
         busy(false);
+    }
+
+    async function saveBookOffline(btn) {
+        if (!window.Offline) return;
+        const id = btn.dataset.save;
+        if (window.Offline.isSaved(id)) {
+            await window.Offline.removeBook(id);
+            toast('أُزيل الحفظ بدون إنترنت لهذا الكتاب.');
+            loadBooks(state.currentSubject);
+            return;
+        }
+        const original = btn.textContent;
+        btn.disabled = true;
+        try {
+            const res = await window.Offline.saveBook(id, (msg) => { btn.textContent = msg; }, {
+                subjectId: state.currentSubject,
+                gradeId: state.currentGrade,
+            });
+            toast(`تم حفظ الكتاب بدون إنترنت (${res.lessons} درس).`);
+            btn.textContent = '✅ محفوظ بدون إنترنت';
+            btn.classList.add('primary');
+        } catch (e) {
+            toast(e.message || 'تعذّر الحفظ بدون إنترنت', 'error');
+            btn.textContent = original;
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     async function loadLessons(bookId) {
@@ -1000,10 +1048,12 @@
     // Shown when the API cannot be reached at all (server down / no network),
     // so the user sees a clear message instead of a blank page.
     function connectionErrorScreen(err) {
+        const hasOffline = window.Offline && Object.keys(window.Offline.list()).length > 0;
         view.innerHTML = `
         <div class="card offline-card">
             <h2>تعذّر الاتصال بالخادم</h2>
             <p class="muted">لم نتمكن من الوصول إلى خدمة المنصة. تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.</p>
+            ${hasOffline ? '<p class="muted small">لديك كتب محفوظة بدون إنترنت — افتحها من «دروسي» بعد تسجيل الدخول سابقًا.</p>' : '<p class="muted small">نصيحة: افتح كتابًا واحفظه بزر «📥 حفظ بدون إنترنت» ليعمل لاحقًا بلا شبكة.</p>'}
             <p class="muted small">عنوان الخدمة: <code>${esc(API.API_BASE)}</code></p>
             <button class="btn primary" id="retryBoot">إعادة المحاولة</button>
         </div>`;
@@ -1015,12 +1065,21 @@
         const bootEl = el('boot');
         if (bootEl) bootEl.classList.remove('hidden');
         applyBranding();
+        applyNetworkBadge();
         loadConfig()
             .then(() => {
                 if (state.token && state.user) {
                     API.get('/auth/me')
                         .then((d) => { state.user = d.user; showApp(); })
-                        .catch((err) => { if (err && err.isNetworkError) connectionErrorScreen(err); else authScreen(); });
+                        .catch((err) => {
+                            if (err && err.isNetworkError) {
+                                // Offline: keep the cached session so books saved
+                                // for offline stay usable instead of dead-ending.
+                                showApp();
+                            } else {
+                                authScreen();
+                            }
+                        });
                 } else {
                     authScreen();
                 }
