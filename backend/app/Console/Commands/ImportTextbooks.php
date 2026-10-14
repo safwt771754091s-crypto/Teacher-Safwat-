@@ -183,6 +183,8 @@ class ImportTextbooks extends Command
                 'authority' => $entry['authority'] ?? 'common',
                 'branch' => $entry['branch'] ?? 'general',
                 'source_type' => 'pdf',
+                // Keep the official source so pages can be re-rendered on demand.
+                'source_url' => $entry['url'] ?? null,
                 'status' => 'review',
             ],
         );
