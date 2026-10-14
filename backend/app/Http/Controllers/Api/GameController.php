@@ -21,7 +21,7 @@ class GameController extends Controller
         $student = $request->user()->studentProfile;
         $gradeId = $student?->grade_id;
 
-        $games = GameActivity::with('lesson')
+        $games = GameActivity::with(['lesson', 'subject'])
             ->when($gradeId, fn ($q) => $q->where(fn ($w) => $w->whereNull('grade_id')->orWhere('grade_id', $gradeId)))
             ->orderBy('difficulty')
             ->get();

@@ -420,10 +420,20 @@
         if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
         try {
             speechSynthesis.cancel();
-            const u = new SpeechSynthesisUtterance(text);
-            u.lang = 'ar-SA';
-            u.rate = 0.95;
-            speechSynthesis.speak(u);
+            // Split into bilingual chunks so English words are read in English
+            // and the Arabic explanation/translation in Arabic.
+            const chunks = String(text)
+                .split(/(?<=[.!?؟،])\s+|\s+—\s+|\n+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            (chunks.length ? chunks : [String(text)]).forEach((chunk) => {
+                const latin = (chunk.match(/[A-Za-z]/g) || []).length;
+                const arabic = (chunk.match(/[\u0600-\u06FF]/g) || []).length;
+                const u = new SpeechSynthesisUtterance(chunk);
+                u.lang = latin > 0 && latin >= arabic ? 'en-US' : 'ar-SA';
+                u.rate = 0.95;
+                speechSynthesis.speak(u);
+            });
         } catch (e) {}
     }
 
@@ -456,7 +466,7 @@
             ${games.map((g) => `<button class="game-card" data-game='${esc(JSON.stringify(g))}'>
                 <span class="game-ic">${gameIcon(g.type)}</span>
                 <strong>${esc(g.title)}</strong>
-                <span class="muted small">مستوى ${g.difficulty} · ${g.points} نقطة</span>
+                <span class="muted small">${g.subject ? esc(g.subject.name) + ' · ' : ''}مستوى ${g.difficulty} · ${g.points} نقطة</span>
             </button>`).join('') || '<p class="muted">لا توجد ألعاب.</p>'}
         </div>`;
         view.querySelectorAll('[data-game]').forEach((b) => {
