@@ -7,6 +7,7 @@ use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\Subject;
 use App\Models\Textbook;
+use App\Services\TextbookExportService;
 use Illuminate\Http\Request;
 
 class CurriculumController extends Controller
@@ -54,5 +55,46 @@ class CurriculumController extends Controller
         $pageRow = $textbook->pages()->where('page_number', $page)->first();
         abort_if(! $pageRow, 404, 'الصفحة غير موجودة.');
         return response()->json(['page' => $pageRow]);
+    }
+
+    /**
+     * Download a whole textbook (all lessons, explanations, exercises) as a
+     * single PDF or offline HTML file.
+     */
+    public function downloadTextbook(Textbook $textbook, Request $request, TextbookExportService $export)
+    {
+        $textbook->loadMissing('subject.grade');
+        $name = trim(implode(' - ', array_filter([$textbook->subject?->grade?->name, $textbook->subject?->name, $textbook->title])));
+
+        return $this->download(fn () => $export->textbookHtml($textbook), $export, $request, $name ?: 'textbook');
+    }
+
+    /**
+     * Download an entire grade: every subject's textbook in one document.
+     */
+    public function downloadGrade(Grade $grade, Request $request, TextbookExportService $export)
+    {
+        return $this->download(fn () => $export->gradeHtml($grade), $export, $request, $grade->name);
+    }
+
+    private function download(callable $htmlFactory, TextbookExportService $export, Request $request, string $name)
+    {
+        $format = $request->query('format', 'pdf') === 'html' ? 'html' : 'pdf';
+        $safe = preg_replace('/[^\p{Arabic}\p{Latin}0-9 \-_]/u', '', $name);
+        $safe = trim(preg_replace('/\s+/', ' ', $safe)) ?: 'book';
+
+        if ($format === 'html') {
+            return response($htmlFactory(), 200, [
+                'Content-Type' => 'text/html; charset=utf-8',
+                'Content-Disposition' => 'attachment; filename="book.html"; filename*=UTF-8\'\'' . rawurlencode($safe . '.html'),
+            ]);
+        }
+
+        $bytes = $export->pdf($htmlFactory());
+
+        return response($bytes, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="book.pdf"; filename*=UTF-8\'\'' . rawurlencode($safe . '.pdf'),
+        ]);
     }
 }

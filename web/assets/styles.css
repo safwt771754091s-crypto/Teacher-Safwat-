@@ -109,7 +109,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     background: #fff; color: var(--green-dark); border: 1.5px solid var(--green);
     padding: 11px 18px; border-radius: 12px; font: inherit; font-weight: 700;
-    cursor: pointer; transition: .15s;
+    cursor: pointer; transition: .15s; text-decoration: none;
 }
 .btn:hover { background: var(--green-light); }
 .btn.primary { background: var(--green); color: #fff; border-color: var(--green); }

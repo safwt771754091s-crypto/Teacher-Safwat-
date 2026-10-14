@@ -156,4 +156,41 @@ class CurriculumTest extends TestCase
         $this->assertStringContainsString('الإنجليزية', $q['q']);
         $this->assertMatchesRegularExpression('/[\p{Arabic}]/u', $q['answer']);
     }
+
+    public function test_whole_textbook_is_downloadable_as_html_with_exercises(): void
+    {
+        $book = \App\Models\Textbook::whereHas('lessons.exercises')->firstOrFail();
+
+        $res = $this->get("/api/v1/textbooks/{$book->id}/download?format=html")->assertOk();
+        $this->assertStringContainsString('text/html', $res->headers->get('Content-Type'));
+        $this->assertStringContainsString('attachment', $res->headers->get('Content-Disposition'));
+
+        $html = $res->getContent();
+        $this->assertStringContainsString('dir="rtl"', $html);
+        // Every lesson of the book appears, with its exercises and answers.
+        $this->assertSame($book->lessons()->count(), substr_count($html, 'class="lesson"'));
+        $this->assertStringContainsString('class="exercise"', $html);
+        $this->assertStringContainsString('الجواب:', $html);
+    }
+
+    public function test_whole_grade_is_downloadable_as_html(): void
+    {
+        $grade = Grade::where('level', 1)->firstOrFail();
+
+        $res = $this->get("/api/v1/grades/{$grade->id}/download?format=html")->assertOk();
+        $html = $res->getContent();
+
+        $this->assertStringContainsString($grade->name, $html);
+        $this->assertStringContainsString('المنهج اليمني', $html);
+        $this->assertGreaterThan(1, substr_count($html, 'class="lesson"'));
+    }
+
+    public function test_whole_textbook_pdf_is_generated(): void
+    {
+        $book = \App\Models\Textbook::whereHas('lessons')->firstOrFail();
+
+        $res = $this->get("/api/v1/textbooks/{$book->id}/download?format=pdf")->assertOk();
+        $this->assertSame('application/pdf', $res->headers->get('Content-Type'));
+        $this->assertStringStartsWith('%PDF', $res->getContent());
+    }
 }
