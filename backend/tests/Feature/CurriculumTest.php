@@ -193,4 +193,17 @@ class CurriculumTest extends TestCase
         $this->assertSame('application/pdf', $res->headers->get('Content-Type'));
         $this->assertStringStartsWith('%PDF', $res->getContent());
     }
+
+    public function test_download_includes_the_actual_textbook_pages(): void
+    {
+        $book = \App\Models\Textbook::whereHas('pages', fn ($q) => $q->whereNotNull('extracted_text'))->firstOrFail();
+
+        $html = $this->get("/api/v1/textbooks/{$book->id}/download?format=html")->assertOk()->getContent();
+        $this->assertStringContainsString('نصّ الكتاب', $html);
+        $this->assertStringContainsString('class="page"', $html);
+
+        // `pages=0` returns the explanation/exercises only.
+        $without = $this->get("/api/v1/textbooks/{$book->id}/download?format=html&pages=0")->assertOk()->getContent();
+        $this->assertStringNotContainsString('class="page"', $without);
+    }
 }
