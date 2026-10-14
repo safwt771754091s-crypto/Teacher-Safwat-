@@ -66,6 +66,29 @@ class MathQuestionBankTest extends TestCase
         $this->assertGreaterThan(0, $evaluated, 'pool should include arithmetic items');
     }
 
+    public function test_pool_for_theme_only_emits_matching_questions(): void
+    {
+        $bank = new MathQuestionBank();
+
+        $addition = $bank->poolFor('g1_3', 'addition', 12);
+        $this->assertCount(12, $addition);
+        foreach ($addition as $q) {
+            $this->assertMatchesRegularExpression('/^\d+ \+ \d+$/u', $this->toLatin($q['q']), 'fast-addition must be addition only');
+        }
+
+        $missing = $bank->poolFor('g1_3', 'missing', 10);
+        $this->assertCount(10, $missing);
+        foreach ($missing as $q) {
+            $this->assertStringContainsString('أكمل النمط', $q['q']);
+        }
+
+        $tables = $bank->poolFor('g4_6', 'tables', 12);
+        $this->assertCount(12, $tables);
+        foreach ($tables as $q) {
+            $this->assertMatchesRegularExpression('/[×]|\//u', $this->toLatin($q['q']), 'tables game mixes multiplication and fractions');
+        }
+    }
+
     private function toLatin(string $value): string
     {
         return str_replace(

@@ -117,13 +117,17 @@ class UsersAndGamesSeeder extends Seeder
         $bank = app(\App\Services\MathQuestionBank::class);
         $band = $bank->bandForGrade($grade1?->level ?? 1);
 
+        // Each named game serves the question type its title promises (fast
+        // addition → addition, missing numbers → number patterns, etc.).
         $games = [
             ['title' => 'لعبة الأعداد الناقصة', 'type' => 'math', 'difficulty' => 1, 'points' => 10,
-                'config' => ['questions' => $bank->pool($band, 10)]],
+                'config' => ['questions' => $bank->poolFor($band, 'missing', 10)]],
             ['title' => 'لعبة الجمع السريع', 'type' => 'math', 'difficulty' => 2, 'points' => 15,
-                'config' => ['questions' => $bank->pool($band, 12)]],
+                'config' => ['questions' => $bank->poolFor($band, 'addition', 12)]],
             ['title' => 'تحدي الجدول والكسور', 'type' => 'math', 'difficulty' => 3, 'points' => 20,
-                'config' => ['questions' => $bank->pool('g4_6', 12)]],
+                'config' => ['questions' => $bank->poolFor('g4_6', 'tables', 12)]],
+            ['title' => 'لعبة الطرح والضرب', 'type' => 'math', 'difficulty' => 2, 'points' => 15,
+                'config' => ['questions' => $bank->poolFor($band, 'subtraction', 12)]],
             ['title' => 'صنّف: حي أم جماد؟', 'type' => 'sorting', 'difficulty' => 2, 'points' => 15,
                 'config' => ['questions' => [
                     ['q' => 'القطة', 'options' => ['كائن حي', 'جماد'], 'answer' => 'كائن حي'],
