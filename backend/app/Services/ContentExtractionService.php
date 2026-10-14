@@ -16,6 +16,9 @@ use Smalot\PdfParser\Parser;
  */
 class ContentExtractionService
 {
+    /** @var array<string,true> Lines repeated across the book (headers/footers). */
+    private array $boilerplateLines = [];
+
     /**
      * Extract text page-by-page from a PDF and persist textbook_pages rows.
      * Tries the embedded text layer first; for scanned pages (no text layer) it
@@ -251,6 +254,8 @@ class ContentExtractionService
             ->get()
             ->filter(fn ($p) => $this->looksReadable((string) $p->extracted_text));
 
+        $this->boilerplateLines = $this->detectBoilerplate($pages);
+
         $lessons = [];   // list of ['title','page_from','page_to','sections'=>[]]
         $current = null; // active lesson index
 
@@ -266,12 +271,18 @@ class ContentExtractionService
             }
 
             foreach ($lines as $line) {
-                if ($this->isUnitHeading($line)) {
-                    continue; // unit banners are section context, not lessons
+                if ($this->isUnitHeading($line) || $this->isActivityHeading($line)) {
+                    continue; // unit/activity banners are section context, not lessons
                 }
                 if ($this->isLessonHeading($line)) {
+                    $title = $this->cleanHeading($line);
+                    // Ignore a repeated running header instead of forking a
+                    // second lesson with the same title.
+                    if ($current !== null && $this->sameHeading($title, $lessons[$current]['title'])) {
+                        continue;
+                    }
                     $lessons[] = [
-                        'title' => $this->cleanHeading($line),
+                        'title' => $title,
                         'page_from' => $page->page_number,
                         'page_to' => $page->page_number,
                         'sections' => [],
@@ -281,6 +292,9 @@ class ContentExtractionService
                 }
                 if ($current === null) {
                     continue; // front matter (contents, unit intro) is not a lesson
+                }
+                if ($this->isNoiseLine($line)) {
+                    continue;
                 }
                 $lessons[$current]['page_to'] = $page->page_number;
                 $lessons[$current]['sections'][] = [
@@ -298,8 +312,23 @@ class ContentExtractionService
         // Books with no "الدرس" (e.g. primary maths) still mark الوحدة/الفصل
         // sections; group pages under those so the book stays navigable rather
         // than becoming one meaningless lesson per page.
-        if (empty($lessons)) {
-            $lessons = $this->segmentByUnit($pages);
+        if (count($lessons) < 4) {
+            $units = $this->segmentByUnit($pages);
+            if (count($units) > count($lessons)) {
+                $lessons = $units;
+            }
+        }
+
+        // When heading detection failed, the book collapses into a handful of
+        // giant lessons. A real lesson runs a few pages, so averaging >20 pages
+        // per lesson means the structure was missed. Fall back to page ranges -
+        // never invented titles - which keeps the book navigable.
+        $pageCount = $pages->count();
+        if ($pageCount >= 20 && count($lessons) < max(2, (int) floor($pageCount / 20))) {
+            $chunks = $this->chunkByPages($pages, 6);
+            if (count($chunks) > count($lessons)) {
+                $lessons = $chunks;
+            }
         }
 
         $textbook->lessons()->delete();
@@ -336,18 +365,194 @@ class ContentExtractionService
     }
 
     /**
-     * Tidy an OCR lesson heading: strip a trailing dot-page leader (". ١٢" or
-     * "..") that contents pages append, and collapse whitespace.
+     * Tidy an OCR heading. OCR glues page-leader debris onto headings
+     * ("الوحدة السابعة: مممم ... 60060000000"); cut at the first long digit run
+     * or run of repeated characters, then strip trailing punctuation.
      */
+    public function tidyHeading(string $line): string
+    {
+        $line = trim($line);
+        $line = preg_replace('/\d{5,}.*$/u', '', $line) ?? $line;
+        $line = preg_replace('/(.)\1{4,}.*$/u', '', $line) ?? $line;
+
+        // Peel trailing OCR garbage tokens ("ممم", "ـــ", bare digits) that
+        // cling to the end of a heading.
+        $parts = preg_split('/\s+/u', $line) ?: [];
+        while (! empty($parts) && $this->isJunkToken((string) end($parts))) {
+            array_pop($parts);
+        }
+        $line = implode(' ', $parts);
+        $line = preg_replace('/[\s.:،؛\x{0640}]+$/u', '', $line) ?? $line;
+
+        return mb_substr(trim((string) $line), 0, 120);
+    }
+
+    /** A token is OCR debris when it is <2 chars, has no Arabic letter, or is a single character repeated. */
+    private function isJunkToken(string $token): bool
+    {
+        if (mb_strlen($token) < 2) {
+            return true;
+        }
+        if (! preg_match('/[\x{0621}-\x{064A}]/u', $token)) {
+            return true;
+        }
+        $chars = preg_split('//u', $token, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return count(array_unique($chars)) === 1;
+    }
+
     private function cleanHeading(string $line): string
     {
-        $line = preg_replace('/[\s.\x{0640}]+$/u', '', trim($line));
-        return mb_substr(trim((string) $line), 0, 120);
+        return $this->tidyHeading($line);
+    }
+
+    /**
+     * Two headings name the same group when their leading words match (OCR
+     * differs only in trailing digits/noise). Folds a repeated running header
+     * into the current group instead of starting a new one.
+     */
+    private function sameHeading(string $a, string $b): bool
+    {
+        $a = trim(preg_replace('/\s+/u', ' ', $a) ?? $a);
+        $b = trim(preg_replace('/\s+/u', ' ', $b) ?? $b);
+        if ($a === '' || $b === '') {
+            return false;
+        }
+        if ($a === $b) {
+            return true;
+        }
+
+        return mb_substr($a, 0, 10) === mb_substr($b, 0, 10);
     }
 
     private function isUnitHeading(string $line): bool
     {
-        return (bool) preg_match('/^(الوحدة|الفصل)\b/u', $line);
+        return (bool) preg_match('/^(الوحدة|الموضوع|المحور|الفصل)\b/u', $line);
+    }
+
+    /**
+     * Primary editions mark each activity with a "نشاط ..." banner; treat it as
+     * a group heading so a book without per-lesson headings stays navigable.
+     */
+    private function isActivityHeading(string $line): bool
+    {
+        return (bool) preg_match('/^نشاط\b/u', $line);
+    }
+
+    /**
+     * Drop OCR debris and repeated running headers/footers so they neither
+     * become a lesson's content nor masquerade as a heading: URL/email footers,
+     * too-short lines, and lines with no Arabic letter (garbled glyph runs).
+     */
+    private function isNoiseLine(string $line): bool
+    {
+        $line = trim($line);
+        if ($line === '') {
+            return true;
+        }
+        if (isset($this->boilerplateLines[$line])) {
+            return true;
+        }
+        if (preg_match('/(www\.|\.ye\b|edu\.|@)/iu', $line)) {
+            return true;
+        }
+        if (mb_strlen($line) < 3) {
+            return true;
+        }
+
+        return ! preg_match('/[\x{0621}-\x{064A}]/u', $line);
+    }
+
+    /**
+     * Lines repeated across many pages (running headers/footers, publisher and
+     * site furniture) carry no lesson content. Treat a line seen on >=8 pages
+     * and >=30% of the book as boilerplate.
+     *
+     * @param  \Illuminate\Support\Collection<int,TextbookPage>  $pages
+     * @return array<string,true>
+     */
+    private function detectBoilerplate($pages): array
+    {
+        $counts = [];
+        foreach ($pages as $page) {
+            $seen = [];
+            foreach (preg_split('/\r\n|\r|\n/', (string) $page->extracted_text) as $line) {
+                $line = trim($line);
+                if ($line !== '') {
+                    $seen[$line] = true;
+                }
+            }
+            foreach (array_keys($seen) as $line) {
+                $counts[$line] = ($counts[$line] ?? 0) + 1;
+            }
+        }
+
+        $threshold = max(8, (int) floor(max(1, $pages->count()) * 0.3));
+        $boilerplate = [];
+        foreach ($counts as $line => $n) {
+            if ($n >= $threshold) {
+                $boilerplate[$line] = true;
+            }
+        }
+
+        return $boilerplate;
+    }
+
+    /**
+     * Last-resort segmentation for books with no usable headings: split the
+     * pages into fixed-size ranges titled only by their page span. No title is
+     * invented; the range is the honest structure the text provides.
+     *
+     * @param  \Illuminate\Support\Collection<int,TextbookPage>  $pages
+     * @return list<array{title:string,page_from:int,page_to:int,sections:list<array{type:string,content:string,source_page:int}>}>
+     */
+    private function chunkByPages($pages, int $size): array
+    {
+        $chunks = [];
+        $buffer = [];
+        $from = null;
+        $to = null;
+
+        $flush = function () use (&$chunks, &$buffer, &$from, &$to) {
+            if (empty($buffer)) {
+                return;
+            }
+            $chunks[] = [
+                'title' => "صفحات {$from} - {$to}",
+                'page_from' => $from,
+                'page_to' => $to,
+                'sections' => $buffer,
+            ];
+            $buffer = [];
+            $from = null;
+            $to = null;
+        };
+
+        foreach ($pages as $page) {
+            $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $page->extracted_text))));
+            $lines = array_values(array_filter(
+                $lines,
+                fn ($l) => ! $this->isNoiseLine($l) && ! $this->isUnitHeading($l) && ! $this->isActivityHeading($l),
+            ));
+            if (empty($lines)) {
+                continue;
+            }
+            $from = $from ?? $page->page_number;
+            $to = $page->page_number;
+            foreach ($lines as $line) {
+                $buffer[] = [
+                    'type' => $this->guessSectionType($line),
+                    'content' => $line,
+                    'source_page' => $page->page_number,
+                ];
+            }
+            if (($to - $from) >= $size) {
+                $flush();
+            }
+        }
+        $flush();
+
+        return $chunks;
     }
 
     /**
@@ -365,7 +570,10 @@ class ContentExtractionService
 
         foreach ($pages as $page) {
             $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $page->extracted_text))));
-            $headings = array_values(array_filter($lines, fn ($l) => $this->isUnitHeading($l)));
+            $headings = array_values(array_filter(
+                $lines,
+                fn ($l) => $this->isUnitHeading($l) || $this->isActivityHeading($l),
+            ));
 
             // A contents page lists several units at once; skip it so it cannot
             // masquerade as a unit with no content.
@@ -380,13 +588,19 @@ class ContentExtractionService
             ));
 
             if ($heading !== null) {
-                $units[] = [
-                    'title' => 'الوحدة: ' . $this->cleanHeading($heading),
-                    'page_from' => $page->page_number,
-                    'page_to' => $page->page_number,
-                    'sections' => [],
-                ];
-                $current = count($units) - 1;
+                $title = $this->cleanHeading($heading);
+                // A heading repeated on consecutive pages is a running header,
+                // not a new group; continue the current one instead of creating
+                // a stream of identically-titled lessons.
+                if ($current === null || ! $this->sameHeading($title, $units[$current]['title'])) {
+                    $units[] = [
+                        'title' => $title,
+                        'page_from' => $page->page_number,
+                        'page_to' => $page->page_number,
+                        'sections' => [],
+                    ];
+                    $current = count($units) - 1;
+                }
             } elseif ($current === null) {
                 $units[] = [
                     'title' => 'مقدمة الكتاب',
@@ -399,6 +613,9 @@ class ContentExtractionService
 
             $units[$current]['page_to'] = $page->page_number;
             foreach ($body as $line) {
+                if ($this->isNoiseLine($line)) {
+                    continue;
+                }
                 $units[$current]['sections'][] = [
                     'type' => $this->guessSectionType($line),
                     'content' => $line,

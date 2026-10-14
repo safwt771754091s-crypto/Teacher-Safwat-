@@ -83,7 +83,9 @@ return [
         'tesseract' => env('OCR_TESSERACT', 'tesseract'),
         'pdftoppm' => env('OCR_PDFTOPPM', 'pdftoppm'),
         'language' => env('OCR_LANGUAGE', 'ara'),
-        'dpi' => (int) env('OCR_DPI', 160),
+        // 300 dpi is noticeably cleaner for Arabic OCR than 160–220, which
+        // matters because the official editions ship a broken text layer.
+        'dpi' => (int) env('OCR_DPI', 300),
         'workers' => (int) env('OCR_WORKERS', 4),
         'threads' => (int) env('OCR_THREADS', 1),
     ],
