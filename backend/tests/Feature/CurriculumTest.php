@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Grade;
 use App\Models\Lesson;
+use App\Models\Subject;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -78,6 +79,21 @@ class CurriculumTest extends TestCase
                 ->count();
             $this->assertGreaterThanOrEqual(4, $lessons, "grade {$grade->level} has too few lessons");
         }
+    }
+
+    public function test_full_curriculum_is_loaded_from_the_reference_file(): void
+    {
+        // The official reference covers grades 1–12 with 1194 lessons.
+        $this->assertGreaterThanOrEqual(1000, Lesson::where('status', 'published')->count());
+        $this->assertGreaterThanOrEqual(100, Subject::count());
+
+        $grade12 = Grade::where('level', 12)->firstOrFail();
+        $names = $grade12->subjects()->pluck('name');
+        $this->assertTrue($names->contains('الفلسفة والمنطق'));
+        $this->assertTrue($names->contains('علم النفس والاجتماع'));
+
+        $grade5 = Grade::where('level', 5)->firstOrFail();
+        $this->assertTrue($grade5->subjects()->pluck('name')->contains('اللغة الإنجليزية'));
     }
 
     public function test_secondary_grade_subjects_are_browsable(): void

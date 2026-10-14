@@ -1,0 +1,61 @@
+# Render blueprint for the Yemeni Smart Teacher API.
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> connect this repo.
+# The static web app is served separately from GitHub Pages and points at the
+# service URL below via web/assets/config.js (PROD_API_ORIGIN) or the
+# <meta name="api-base"> tag in web/index.html.
+#
+# Required secrets (set in the Render dashboard, never committed):
+#   DB_URL        Supabase "Session pooler" connection string
+#                 postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#   APP_KEY       php artisan key:generate --show
+#   OWNER_EMAIL   first owner email
+#   OWNER_PASSWORD first owner password (min 10 chars)
+#   CORS_ALLOWED_ORIGINS  e.g. https://<user>.github.io
+services:
+  - type: web
+    name: yemeni-smart-teacher-api
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_SSLMODE
+        value: require
+      - key: DB_DATABASE
+        value: postgres
+      - key: SESSION_DRIVER
+        value: database
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: sync
+      - key: PLATFORM_OWNER
+        value: المعلم صفوت
+      - key: PLATFORM_REPO_URL
+        value: https://github.com/safwt771754091s-crypto/Teacher-Safwat-
+      # --- Secrets: set these in the Render dashboard (sync: false) ---
+      - key: APP_KEY
+        sync: false
+      - key: DB_URL
+        sync: false
+      - key: OWNER_EMAIL
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      # Optional: connect the grounded AI teacher to an OpenAI-compatible LLM.
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false

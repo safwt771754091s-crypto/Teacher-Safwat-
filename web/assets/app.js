@@ -12,19 +12,34 @@
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const el = (id) => document.getElementById(id);
 
-    const platform = { owner: { name: 'المعلم صفوت', title: 'معلم المنصة' } };
+    const platform = {
+        owner: { name: 'المعلم صفوت', title: 'معلم المنصة' },
+        repo: { name: 'Teacher-Safwat-', url: 'https://github.com/safwt771754091s-crypto/Teacher-Safwat-' },
+    };
 
     function applyBranding() {
         const nameEl = el('ownerName');
         if (nameEl) nameEl.textContent = platform.owner.name;
         const creditEl = el('ownerCredit');
         if (creditEl) creditEl.textContent = platform.owner.name;
+        document.querySelectorAll('[data-repo-link]').forEach((a) => {
+            a.href = platform.repo.url;
+            a.textContent = platform.repo.name;
+        });
     }
 
     function loadConfig() {
         return API.get('/config', { auth: false })
-            .then((d) => { if (d && d.owner) platform.owner = d.owner; })
-            .catch(() => {})
+            .then((d) => {
+                if (d && d.owner) platform.owner = d.owner;
+                if (d && d.repo) platform.repo = d.repo;
+            })
+            .catch((err) => {
+                // A reachable API that fails /config is non-fatal (branding
+                // defaults apply), but a network failure must surface so the
+                // boot screen can offer a retry.
+                if (err && err.isNetworkError) throw err;
+            })
             .then(applyBranding);
     }
 
@@ -53,7 +68,7 @@
         <section class="hero">
             <h1>معلّمي الذكي اليمني</h1>
             <p>معلم منزلي رقمي يشرح لك دروس كتاب المنهج اليمني، يلخّصها، يقرؤها بصوت، ويحلّ التمارين خطوة بخطوة — مع ألعاب تعليمية ممتعة.</p>
-            <p class="muted small">بإعداد المعلم <strong id="ownerCredit">المعلم صفوت</strong></p>
+            <p class="muted small">بإعداد المعلم <strong id="ownerCredit">المعلم صفوت</strong> · المستودع: <a data-repo-link href="https://github.com/safwt771754091s-crypto/Teacher-Safwat-" target="_blank" rel="noopener">Teacher-Safwat-</a></p>
             <div class="hero-features">
                 <span>📖 شرح من الكتاب نفسه</span>
                 <span>🔊 استماع للدروس</span>
@@ -193,7 +208,11 @@
     }
 
     function subjectIcon(ic) {
-        return ({ book: '📖', mosque: '🕌', text: '🔤', calc: '➗', leaf: '🌿', globe: '🌍' })[ic] || '📚';
+        return ({
+            book: '📖', mosque: '🕌', text: '🔤', calc: '➗', leaf: '🌿', globe: '🌍',
+            atom: '⚛️', flask: '⚗️', palette: '🎨', ball: '⚽', chip: '💻', tools: '🛠️',
+            scroll: '🏛️', map: '🗺️', scales: '⚖️', brain: '🧠', think: '🤔',
+        })[ic] || '📚';
     }
 
     async function loadBooks(subjectId) {
@@ -462,13 +481,16 @@
                 <div class="play-opts">${q.options.map((o) => `<button class="btn" data-opt="${esc(o)}">${esc(o)}</button>`).join('')}</div>
                 <div id="playFb" class="muted"></div>`;
             el('modal').classList.remove('hidden');
+            speak(q.q);
             el('modalBody').querySelectorAll('[data-opt]').forEach((b) => {
                 b.onclick = () => {
                     const ok = b.dataset.opt === q.answer;
                     if (ok) correct++;
-                    el('playFb').innerHTML = ok ? '<span class="ok-text">✅ صحيح</span>' : `<span class="bad-text">❌ الصحيح: ${esc(q.answer)}</span>`;
-                    speak(ok ? 'صحيح' : 'حاول مرة أخرى');
-                    setTimeout(() => { idx++; renderQ(); }, 700);
+                    el('playFb').innerHTML = ok
+                        ? '<span class="ok-text">✅ أحسنت! إجابة صحيحة</span>'
+                        : `<span class="bad-text">❌ أخطأت، الإجابة الصحيحة: ${esc(q.answer)}</span>`;
+                    speak(ok ? 'أحسنت' : 'أخطأت، حاول مرة أخرى');
+                    setTimeout(() => { idx++; renderQ(); }, 900);
                 };
             });
         }
@@ -953,12 +975,41 @@
     };
 
     // ---------------- Boot ----------------
-    applyBranding();
-    loadConfig().then(() => {
-        if (state.token && state.user) {
-            API.get('/auth/me').then((d) => { state.user = d.user; showApp(); }).catch(() => authScreen());
-        } else {
-            authScreen();
-        }
+    // A 401 anywhere in the app drops the local session and returns to login.
+    API.setUnauthorizedHandler(() => {
+        if (!el('loginForm')) authScreen();
     });
+
+    // Shown when the API cannot be reached at all (server down / no network),
+    // so the user sees a clear message instead of a blank page.
+    function connectionErrorScreen(err) {
+        view.innerHTML = `
+        <div class="card offline-card">
+            <h2>تعذّر الاتصال بالخادم</h2>
+            <p class="muted">لم نتمكن من الوصول إلى خدمة المنصة. تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.</p>
+            <p class="muted small">عنوان الخدمة: <code>${esc(API.API_BASE)}</code></p>
+            <button class="btn primary" id="retryBoot">إعادة المحاولة</button>
+        </div>`;
+        const retry = el('retryBoot');
+        if (retry) retry.onclick = () => boot();
+    }
+
+    function boot() {
+        const bootEl = el('boot');
+        if (bootEl) bootEl.classList.remove('hidden');
+        applyBranding();
+        loadConfig()
+            .then(() => {
+                if (state.token && state.user) {
+                    API.get('/auth/me')
+                        .then((d) => { state.user = d.user; showApp(); })
+                        .catch((err) => { if (err && err.isNetworkError) connectionErrorScreen(err); else authScreen(); });
+                } else {
+                    authScreen();
+                }
+            })
+            .catch((err) => connectionErrorScreen(err));
+    }
+
+    boot();
 })();

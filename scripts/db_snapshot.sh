@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Persist the demo database across sandbox rebuilds.
+# Persist the demo database across sandbox rebuilds (PostgreSQL edition).
 #
-# The Agent Canvas sandbox is wiped periodically: MariaDB and its data dir are
+# The Agent Canvas sandbox is wiped periodically: PostgreSQL and its data dir are
 # reinstalled empty, but /workspace persists. We therefore keep a logical dump
 # (schema + data) of the seeded/imported database in /workspace, and restore it
 # automatically after a reset so imported textbooks and OCR pages are not lost.
@@ -15,16 +15,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="/usr/local/bin:$PATH"
 
 DB_NAME="${DB_NAME:-teacher_safwat}"
-DB_USER="${DB_USER:-ts}"
-DB_PASS="${DB_PASS:-ts_secret}"
+DB_USER="${DB_USER:-school}"
+DB_PASS="${DB_PASS:-school_secret}"
 SNAP="$ROOT/backend/storage/app/db_snapshot.sql"
-
-mariadb_cli() { sudo mariadb "$@"; }
 
 # 1 when the database exists and already holds the app tables.
 db_has_tables() {
     local n
-    n=$(mariadb_cli -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';" 2>/dev/null)
+    n=$(PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo 0)
     [ "${n:-0}" -ge 10 ]
 }
 
@@ -32,11 +31,10 @@ action="${1:-status}"
 case "$action" in
     save)
         db_has_tables || { echo "no tables to snapshot"; exit 1; }
-        dump="$(command -v mariadb-dump || command -v mysqldump)"
-        [ -n "$dump" ] || { echo "no dump binary found"; exit 1; }
         tmp="${SNAP}.tmp"
-        sudo "$dump" --single-transaction --quick --skip-comments \
-            "$DB_NAME" > "$tmp" || { echo "dump failed"; rm -f "$tmp"; exit 1; }
+        PGPASSWORD="$DB_PASS" pg_dump -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" \
+            --no-owner --no-privileges --clean --if-exists > "$tmp" \
+            || { echo "dump failed"; rm -f "$tmp"; exit 1; }
         mv "$tmp" "$SNAP"
         echo "snapshot saved: $(du -h "$SNAP" | cut -f1) $(date -Is)"
         ;;
@@ -46,10 +44,12 @@ case "$action" in
             echo "database already populated; skipping restore"
             exit 0
         fi
-        mariadb_cli -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-            CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
-            GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
-        mariadb_cli "$DB_NAME" < "$SNAP" || { echo "restore failed"; exit 1; }
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 \
+            || sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}' SUPERUSER;"
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+            || sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+        PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" < "$SNAP" \
+            || { echo "restore failed"; exit 1; }
         echo "snapshot restored: $(date -Is)"
         ;;
     *)

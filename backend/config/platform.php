@@ -9,6 +9,40 @@ return [
         'email' => env('PLATFORM_OWNER_EMAIL', 'teacher@safwat.ye'),
     ],
 
+    'repo' => [
+        'name' => env('PLATFORM_REPO', 'Teacher-Safwat-'),
+        'url' => env('PLATFORM_REPO_URL', 'https://github.com/safwt771754091s-crypto/Teacher-Safwat-'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Demo data
+    |--------------------------------------------------------------------------
+    | Shared demo accounts (student/teacher/parent/owner with the password
+    | "password") are a development convenience. They are never created in
+    | production; set SEED_DEMO_USERS=true to force them on (e.g. a demo host).
+    */
+    'seed_demo_users' => (bool) env('SEED_DEMO_USERS', env('APP_ENV', 'production') !== 'production'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Supabase (managed PostgreSQL)
+    |--------------------------------------------------------------------------
+    | The database is hosted on Supabase. Only non-secret coordinates live here;
+    | the connection password is provided through the environment (DB_PASSWORD or
+    | the full DB_URL) and never committed. Supabase Auth is intentionally NOT
+    | used: authentication is Laravel Sanctum, so there is a single identity
+    | system shared by the API and the web client.
+    */
+    'supabase' => [
+        'project_ref' => env('SUPABASE_PROJECT_REF', 'jsrpfsybgeplciiqjzqr'),
+        'url' => env('SUPABASE_URL', 'https://jsrpfsybgeplciiqjzqr.supabase.co'),
+        'region' => env('SUPABASE_REGION', 'ap-south-1'),
+        // Host of the Supabase connection pooler for the region above. The DB
+        // user is "postgres.<project_ref>" when connecting through the pooler.
+        'pooler_host' => env('SUPABASE_POOLER_HOST', 'aws-0-ap-south-1.pooler.supabase.com'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Grounded AI teacher
