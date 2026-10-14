@@ -208,7 +208,11 @@
     }
 
     function subjectIcon(ic) {
-        return ({ book: '📖', mosque: '🕌', text: '🔤', calc: '➗', leaf: '🌿', globe: '🌍' })[ic] || '📚';
+        return ({
+            book: '📖', mosque: '🕌', text: '🔤', calc: '➗', leaf: '🌿', globe: '🌍',
+            atom: '⚛️', flask: '⚗️', palette: '🎨', ball: '⚽', chip: '💻', tools: '🛠️',
+            scroll: '🏛️', map: '🗺️', scales: '⚖️', brain: '🧠', think: '🤔',
+        })[ic] || '📚';
     }
 
     async function loadBooks(subjectId) {
