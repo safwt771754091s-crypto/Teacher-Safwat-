@@ -109,4 +109,88 @@ class CurriculumTest extends TestCase
         $lessons = $this->getJson("/api/v1/textbooks/{$book->id}/lessons")->assertOk();
         $this->assertNotEmpty($lessons->json('lessons'));
     }
+
+    public function test_every_subject_has_a_playable_game(): void
+    {
+        $this->assertGreaterThanOrEqual(100, \App\Models\GameActivity::count());
+
+        // Every subject in the curriculum must ship at least one game with a
+        // real question set, so learners get interactive games in all subjects.
+        foreach (Subject::all() as $subject) {
+            $game = \App\Models\GameActivity::where('subject_id', $subject->id)->first();
+            $this->assertNotNull($game, "no game for subject {$subject->name}");
+            $questions = $game->config['questions'] ?? [];
+            $this->assertGreaterThanOrEqual(2, count($questions), "game for {$subject->name} has too few questions");
+            foreach ($questions as $q) {
+                $this->assertArrayHasKey('q', $q);
+                $this->assertContains($q['answer'], $q['options'], "answer missing from options for {$subject->name}");
+            }
+        }
+    }
+
+    public function test_english_lessons_are_explained_in_arabic_and_read_in_english(): void
+    {
+        $subject = Subject::where('name', 'اللغة الإنجليزية')->whereHas('textbooks.lessons')->firstOrFail();
+        $lesson = Lesson::whereHas('textbook', fn ($q) => $q->where('subject_id', $subject->id))
+            ->where('title', 'Greetings')->firstOrFail();
+
+        $explanation = app(\App\Services\AiTeacherService::class)->explain($lesson)['explanation'];
+        $joined = implode("\n", $explanation);
+
+        // Arabic explanation present, English word read, and its translation shown.
+        $this->assertMatchesRegularExpression('/[\p{Arabic}]/u', $joined);
+        $this->assertStringContainsString('Greetings', $joined);
+        $this->assertStringContainsString('—', $joined);
+
+        // The translation exercise accepts the Arabic meaning of the English word.
+        $ex = $lesson->exercises()->where('type', 'short_answer')->firstOrFail();
+        $this->assertMatchesRegularExpression('/[\p{Arabic}]/u', (string) $ex->answer);
+    }
+
+    public function test_english_vocabulary_game_pairs_english_word_with_arabic_meaning(): void
+    {
+        $subject = Subject::where('name', 'اللغة الإنجليزية')->firstOrFail();
+        $game = \App\Models\GameActivity::where('subject_id', $subject->id)->firstOrFail();
+        $q = $game->config['questions'][0];
+
+        $this->assertStringContainsString('الإنجليزية', $q['q']);
+        $this->assertMatchesRegularExpression('/[\p{Arabic}]/u', $q['answer']);
+    }
+
+    public function test_whole_textbook_is_downloadable_as_html_with_exercises(): void
+    {
+        $book = \App\Models\Textbook::whereHas('lessons.exercises')->firstOrFail();
+
+        $res = $this->get("/api/v1/textbooks/{$book->id}/download?format=html")->assertOk();
+        $this->assertStringContainsString('text/html', $res->headers->get('Content-Type'));
+        $this->assertStringContainsString('attachment', $res->headers->get('Content-Disposition'));
+
+        $html = $res->getContent();
+        $this->assertStringContainsString('dir="rtl"', $html);
+        // Every lesson of the book appears, with its exercises and answers.
+        $this->assertSame($book->lessons()->count(), substr_count($html, 'class="lesson"'));
+        $this->assertStringContainsString('class="exercise"', $html);
+        $this->assertStringContainsString('الجواب:', $html);
+    }
+
+    public function test_whole_grade_is_downloadable_as_html(): void
+    {
+        $grade = Grade::where('level', 1)->firstOrFail();
+
+        $res = $this->get("/api/v1/grades/{$grade->id}/download?format=html")->assertOk();
+        $html = $res->getContent();
+
+        $this->assertStringContainsString($grade->name, $html);
+        $this->assertStringContainsString('المنهج اليمني', $html);
+        $this->assertGreaterThan(1, substr_count($html, 'class="lesson"'));
+    }
+
+    public function test_whole_textbook_pdf_is_generated(): void
+    {
+        $book = \App\Models\Textbook::whereHas('lessons')->firstOrFail();
+
+        $res = $this->get("/api/v1/textbooks/{$book->id}/download?format=pdf")->assertOk();
+        $this->assertSame('application/pdf', $res->headers->get('Content-Type'));
+        $this->assertStringStartsWith('%PDF', $res->getContent());
+    }
 }

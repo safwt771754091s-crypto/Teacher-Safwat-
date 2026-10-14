@@ -43,6 +43,8 @@ Route::prefix('v1')->group(function () {
     Route::get('grades/{grade}/subjects', [CurriculumController::class, 'subjects']);
     Route::get('subjects/{subject}/textbooks', [CurriculumController::class, 'textbooks']);
     Route::get('textbooks/{textbook}/lessons', [CurriculumController::class, 'lessons']);
+    Route::get('textbooks/{textbook}/download', [CurriculumController::class, 'downloadTextbook']);
+    Route::get('grades/{grade}/download', [CurriculumController::class, 'downloadGrade']);
     Route::get('lessons/{lesson}', [CurriculumController::class, 'lesson']);
     Route::get('lessons/{lesson}/pages/{page}', [CurriculumController::class, 'pageSource']);
 

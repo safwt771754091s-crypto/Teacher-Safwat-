@@ -192,6 +192,9 @@
         const { subjects } = await API.get(`/grades/${grade.id}/subjects`, { auth: false });
         view.innerHTML = `
         <h2>دروسي — ${esc(grade.name)}</h2>
+        <div class="action-row">
+            <a class="btn primary" href="${API.API_BASE}/grades/${grade.id}/download?format=pdf" download>⬇️ تحميل كتب الصف كامل (PDF)</a>
+        </div>
         <div class="grid cards">
             ${subjects.map((s) => `
                 <button class="subject-card" data-subject="${s.id}" style="--c:${esc(s.color || '#2f6a43')}">
@@ -223,7 +226,11 @@
             <div class="card">
                 <strong>${esc(t.title)}</strong>
                 <span class="muted small">الفصل ${t.term === 'first' ? 'الأول' : 'الثاني'} · ${t.lessons_count} درس · ${authorityLabel(t.authority)}</span>
-                <button class="btn small" data-book="${t.id}">فتح الدروس</button>
+                <div class="action-row">
+                    <button class="btn small" data-book="${t.id}">فتح الدروس</button>
+                    <a class="btn small" href="${API.API_BASE}/textbooks/${t.id}/download?format=pdf" download>⬇️ تحميل الكتاب كامل</a>
+                    <a class="btn small" href="${API.API_BASE}/textbooks/${t.id}/download?format=html" download>⬇️ نسخة بدون إنترنت</a>
+                </div>
             </div>`).join('') + `</div><div id="lessonsArea"></div>`;
         area.scrollIntoView({ behavior: 'smooth' });
         document.querySelectorAll('[data-book]').forEach((b) => {
@@ -420,10 +427,20 @@
         if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
         try {
             speechSynthesis.cancel();
-            const u = new SpeechSynthesisUtterance(text);
-            u.lang = 'ar-SA';
-            u.rate = 0.95;
-            speechSynthesis.speak(u);
+            // Split into bilingual chunks so English words are read in English
+            // and the Arabic explanation/translation in Arabic.
+            const chunks = String(text)
+                .split(/(?<=[.!?؟،])\s+|\s+—\s+|\n+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            (chunks.length ? chunks : [String(text)]).forEach((chunk) => {
+                const latin = (chunk.match(/[A-Za-z]/g) || []).length;
+                const arabic = (chunk.match(/[\u0600-\u06FF]/g) || []).length;
+                const u = new SpeechSynthesisUtterance(chunk);
+                u.lang = latin > 0 && latin >= arabic ? 'en-US' : 'ar-SA';
+                u.rate = 0.95;
+                speechSynthesis.speak(u);
+            });
         } catch (e) {}
     }
 
@@ -456,7 +473,7 @@
             ${games.map((g) => `<button class="game-card" data-game='${esc(JSON.stringify(g))}'>
                 <span class="game-ic">${gameIcon(g.type)}</span>
                 <strong>${esc(g.title)}</strong>
-                <span class="muted small">مستوى ${g.difficulty} · ${g.points} نقطة</span>
+                <span class="muted small">${g.subject ? esc(g.subject.name) + ' · ' : ''}مستوى ${g.difficulty} · ${g.points} نقطة</span>
             </button>`).join('') || '<p class="muted">لا توجد ألعاب.</p>'}
         </div>`;
         view.querySelectorAll('[data-game]').forEach((b) => {

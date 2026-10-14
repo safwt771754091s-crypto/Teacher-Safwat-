@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Exercise;
+use App\Models\GameActivity;
 use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\Subject;
@@ -92,6 +93,7 @@ class FullCurriculumSeeder extends Seeder
                 );
 
                 $this->seedBook($book, $subjectData['units'] ?? []);
+                $this->seedSubjectGames($grade, $subject, $subjectData['units'] ?? []);
             }
         }
     }
@@ -105,6 +107,50 @@ class FullCurriculumSeeder extends Seeder
         }
 
         return $n;
+    }
+
+    /**
+     * Seed one interactive game for every subject so learners have playable
+     * games in all subjects, not just maths. Questions are generated from the
+     * subject's own curriculum (lesson titles / vocabulary / arithmetic), so
+     * every item is answerable without a language model.
+     *
+     * @param  array<int, array{title: string, lessons: array<int, string>}>  $units
+     */
+    private function seedSubjectGames(Grade $grade, Subject $subject, array $units): void
+    {
+        $titles = [];
+        foreach ($units as $unit) {
+            if (! empty($unit['title'])) {
+                $titles[] = (string) $unit['title'];
+            }
+            foreach ($unit['lessons'] ?? [] as $lessonTitle) {
+                $titles[] = (string) $lessonTitle;
+            }
+        }
+
+        $bank = app(\App\Services\GameBank::class);
+        $family = $bank->family($subject);
+        $questions = $bank->questions($subject, $titles, (int) $grade->level, 10);
+        if (count($questions) < 2) {
+            return;
+        }
+
+        $firstLesson = Lesson::whereHas('textbook', fn ($q) => $q->where('subject_id', $subject->id))->first();
+
+        GameActivity::updateOrCreate(
+            ['grade_id' => $grade->id, 'subject_id' => $subject->id],
+            [
+                'title' => $bank->title($subject, $family) . ' — ' . $grade->name,
+                'grade_id' => $grade->id,
+                'subject_id' => $subject->id,
+                'lesson_id' => $firstLesson?->id,
+                'type' => $bank->icon($family),
+                'difficulty' => $grade->level <= 3 ? 1 : ($grade->level <= 6 ? 2 : 3),
+                'points' => 10 + $grade->level,
+                'config' => ['questions' => $questions],
+            ],
+        );
     }
 
     /** @param array<int, array{title: string, lessons: array<int, string>}> $units */
@@ -130,7 +176,8 @@ class FullCurriculumSeeder extends Seeder
             return;
         }
 
-        $points = $this->points($unit, $title, $book->subject->name);
+        $isEnglish = str_contains($book->subject->name, 'إنجليز');
+        $points = $this->points($unit, $title, $book->subject->name, $isEnglish);
 
         $lesson = $existing ?? Lesson::create([
             'textbook_id' => $book->id,
@@ -151,7 +198,7 @@ class FullCurriculumSeeder extends Seeder
             ]);
         }
 
-        foreach ($this->exercises($title, $points) as $i => $e) {
+        foreach ($this->exercises($title, $points, $isEnglish) as $i => $e) {
             $ex = Exercise::create([
                 'lesson_id' => $lesson->id,
                 'type' => $e['type'],
@@ -198,8 +245,23 @@ class FullCurriculumSeeder extends Seeder
     }
 
     /** @return array<int, array{content: string, type: string}> */
-    private function points(string $unit, string $title, string $subject): array
+    private function points(string $unit, string $title, string $subject, bool $isEnglish = false): array
     {
+        // English lessons are explained in Arabic, and the textbook's English
+        // words are read aloud and translated, e.g. "Hello — مرحبًا".
+        if ($isEnglish) {
+            $glossary = app(\App\Services\EnglishGlossary::class);
+            $terms = [$unit, ...explode(' / ', $title)];
+            $bilingual = $glossary->bilingualPoints($title, $terms);
+            $points = [['type' => 'heading', 'content' => 'درس: ' . $title]];
+            foreach ($bilingual as $line) {
+                $points[] = ['type' => 'point', 'content' => $line];
+            }
+            $points[] = ['type' => 'note', 'content' => 'نشرح الدرس بالعربية، ونقرأ الكلمات الإنجليزية من الكتاب ثم نترجمها.'];
+
+            return $points;
+        }
+
         return [
             ['type' => 'heading', 'content' => 'درس: ' . $title],
             ['type' => 'point', 'content' => 'الوحدة: ' . $unit . ' — مادة ' . $subject . '.'],
@@ -217,9 +279,50 @@ class FullCurriculumSeeder extends Seeder
      * @param  array<int, array{content: string, type: string}>  $points
      * @return array<int, array<string, mixed>>
      */
-    private function exercises(string $title, array $points): array
+    private function exercises(string $title, array $points, bool $isEnglish = false): array
     {
         $count = count($points);
+
+        // English lessons get a translation exercise: read the English word and
+        // choose/enter its Arabic meaning.
+        if ($isEnglish) {
+            $glossary = app(\App\Services\EnglishGlossary::class);
+            $terms = collect($points)
+                ->map(fn ($p) => trim((string) $p['content']))
+                ->filter(fn ($c) => preg_match('/^[A-Za-z][A-Za-z\s\-\/]+ — /u', $c))
+                ->map(fn ($c) => trim(explode(' — ', $c, 2)[0]))
+                ->values();
+            $term = $terms->first() ?: $title;
+            $meaning = $glossary->meaning($term) ?? 'مرحبًا';
+
+            return [
+                [
+                    'type' => 'short_answer',
+                    'q' => 'اقرأ الكلمة الإنجليزية «' . $term . '» واكتب معناها بالعربية.',
+                    'answer' => $meaning,
+                    'steps' => [$term . ' تعني بالعربية: ' . $meaning . '.'],
+                    'hint' => 'اقرأ الكلمة بصوت عالٍ ثم تذكّر معناها بالعربية.',
+                ],
+                [
+                    'type' => 'mcq',
+                    'q' => 'ما معنى الكلمة الإنجليزية «' . $term . '»؟',
+                    'answer' => $meaning,
+                    'options' => [
+                        ['text' => $meaning, 'correct' => true],
+                        ['text' => 'غير ذلك'],
+                    ],
+                    'steps' => ['نقرأ الكلمة بالإنجليزية ثم نترجمها: ' . $meaning . '.'],
+                    'hint' => 'راجع نقطة الترجمة في الدرس.',
+                ],
+                [
+                    'type' => 'short_answer',
+                    'q' => 'اكتب عنوان هذا الدرس.',
+                    'answer' => $title,
+                    'steps' => ['عنوان الدرس هو «' . $title . '».'],
+                    'hint' => 'العنوان مكتوب في أول نقطة من الدرس.',
+                ],
+            ];
+        }
 
         return [
             [
