@@ -14,7 +14,7 @@
     <!-- BUILD is bumped on every deploy. It also versions the shell asset URLs
          so a device stuck on an older cache-first service worker fetches the
          new files (a new URL is never in its cache) instead of serving stale JS. -->
-    <link rel="stylesheet" href="assets/styles.css?v=5">
+    <link rel="stylesheet" href="assets/styles.css?v=6">
 </head>
 <body>
     <div id="app" class="app">
@@ -60,10 +60,10 @@
     <div id="toast" class="toast hidden"></div>
     <div id="modal" class="modal-wrap hidden"><div class="modal" id="modalBody"></div></div>
 
-    <script src="assets/config.js?v=5"></script>
-    <script src="assets/api.js?v=5"></script>
-    <script src="assets/offline.js?v=5"></script>
-    <script src="assets/app.js?v=5"></script>
+    <script src="assets/config.js?v=6"></script>
+    <script src="assets/api.js?v=6"></script>
+    <script src="assets/offline.js?v=6"></script>
+    <script src="assets/app.js?v=6"></script>
     <script>window.Offline && window.Offline.registerServiceWorker();</script>
 </body>
 </html>
