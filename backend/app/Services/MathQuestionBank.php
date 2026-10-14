@@ -38,17 +38,49 @@ class MathQuestionBank
     }
 
     /**
+     * Fixed question types for the named primary games, so a game titled
+     * "fast addition" actually serves addition items (not an arbitrary mix).
+     */
+    private const THEMES = [
+        'addition' => ['addition'],
+        'subtraction' => ['subtraction'],
+        'multiplication' => ['multiplication'],
+        'division' => ['division'],
+        'missing' => ['missing'],
+        'fraction' => ['fraction'],
+        'geometry' => ['geometry'],
+        'squares' => ['squares'],
+        'equation' => ['equation'],
+        'exponent' => ['exponent'],
+        'tables' => ['multiplication', 'fraction'],
+        'numbers' => ['arithmetic', 'missing', 'squares'],
+    ];
+
+    /**
      * @return array<int, array{q: string, options: string[], answer: string}>
      */
     public function pool(string $band, int $count = 12): array
     {
+        return $this->poolFor($band, 'mixed', $count);
+    }
+
+    /**
+     * Build a pool for a named theme (see self::THEMES), or the band's default
+     * mix when $theme is 'mixed'.
+     *
+     * @return array<int, array{q: string, options: string[], answer: string}>
+     */
+    public function poolFor(string $band, string $theme, int $count = 12): array
+    {
         $range = self::BANDS[$band] ?? 30;
-        $generators = match ($band) {
-            'sec' => ['arithmetic', 'squares', 'equation', 'exponent'],
-            'g7_9' => ['arithmetic', 'fraction', 'geometry', 'squares'],
-            'g4_6' => ['arithmetic', 'fraction', 'geometry'],
-            default => ['arithmetic', 'geometry'],
-        };
+        $generators = ($theme !== 'mixed' && isset(self::THEMES[$theme]))
+            ? self::THEMES[$theme]
+            : match ($band) {
+                'sec' => ['arithmetic', 'squares', 'equation', 'exponent'],
+                'g7_9' => ['arithmetic', 'fraction', 'geometry', 'squares'],
+                'g4_6' => ['arithmetic', 'fraction', 'geometry'],
+                default => ['arithmetic', 'geometry'],
+            };
 
         $out = [];
         $guard = 0;
@@ -85,6 +117,32 @@ class MathQuestionBank
     private function arithmetic(int $range): ?array
     {
         $op = ['+', '−', '×', '÷'][random_int(0, 3)];
+
+        return $this->arithmeticOp($op, $range);
+    }
+
+    private function addition(int $range): ?array
+    {
+        return $this->arithmeticOp('+', $range);
+    }
+
+    private function subtraction(int $range): ?array
+    {
+        return $this->arithmeticOp('−', $range);
+    }
+
+    private function multiplication(int $range): ?array
+    {
+        return $this->arithmeticOp('×', $range);
+    }
+
+    private function division(int $range): ?array
+    {
+        return $this->arithmeticOp('÷', $range);
+    }
+
+    private function arithmeticOp(string $op, int $range): ?array
+    {
         if ($op === '+') {
             $a = random_int(1, $range);
             $b = random_int(1, $range);
@@ -107,6 +165,19 @@ class MathQuestionBank
             $ans + random_int(1, 5),
             abs($ans - random_int(1, 5)),
             $ans + random_int(6, 10),
+        ]);
+    }
+
+    /** Complete the sequence: 3, 4, …, 6 → 5. */
+    private function missing(int $range): ?array
+    {
+        $start = random_int(1, max(2, $range - 4));
+        $step = random_int(1, 3);
+        $answer = $start + $step;
+        $last = $answer + $step;
+
+        return $this->mcq("أكمل النمط: {$start} ، {$answer} ، … ، {$last}", $answer, [
+            $answer + 1, max(0, $answer - 1), $last,
         ]);
     }
 
