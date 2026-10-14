@@ -197,18 +197,53 @@ cd backend && php artisan test
 
 - **واجهة الويب** (موقع ثابت): GitHub Pages من فرع `gh-pages`
   → <https://safwt771754091s-crypto.github.io/Teacher-Safwat-/>
-- **الـ API** (Laravel + قاعدة بيانات): خدمة دائمة عبر Docker على Render.
+- **الـ API** (Laravel + قاعدة بيانات): خدمة دائمة عبر Docker على Render، وقاعدة
+  البيانات **Supabase PostgreSQL**.
 
-### نشر الـ API دائمًا (Render)
+> ملاحظة: يمكن تشغيل الـ API من هذه البيئة مباشرةً؛ الواجهة المنشورة على GitHub Pages
+> تشير إليه عبر `PROD_API_ORIGIN` في `web/assets/config.js`. للاستقلال الكامل انشر
+> الـ API على Render كما هو موضح أدناه ثم حدّث `PROD_API_ORIGIN` إلى رابط الخدمة.
+
+### 1) قاعدة البيانات (Supabase PostgreSQL)
+
+أنشئ مشروع Supabase، ثم خُذ رابط **Session pooler** (متوافق مع IPv4):
+
+```
+postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+المنصة تدعم `DB_URL` مباشرةً (يُستخدم تلقائيًا عند ضبطه). عند الإقلاع يشغّل الـ API
+الترحيلات والزرع تلقائيًا (`backend/docker/entrypoint.sh`). للتحقق من الاتصال والمخطط:
+
+```bash
+php artisan platform:db-status
+```
+
+### 2) نشر الـ API دائمًا (Render)
+
 المستودع يحتوي `render.yaml` (Blueprint) و`backend/Dockerfile`. اضغط زر النشر ثم اربط
-المستودع؛ سيبني Render صورة Docker تثبّت PHP 8.4 وتمدّدات PDF، وتشغّل الترحيل والزرع
-تلقائيًا عند الإقلاع (`backend/docker/entrypoint.sh`). صحة الخدمة تُفحص على
-`/api/v1/health`.
+المستودع؛ سيبني Render صورة Docker تثبّت PHP 8.4 و`pdo_pgsql`، وتشغّل الترحيل والزرع
+عند الإقلاع. صحة الخدمة تُفحص على `/api/v1/health`.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 
-بعد ظهور رابط الخدمة (مثل `https://yemeni-smart-teacher-api.onrender.com`)، اضبطه في
-`web/assets/config.js` داخل الثابت `PROD_API_ORIGIN`، ثم أعِد نشر فرع `gh-pages`:
+**متغيرات البيئة المطلوبة** (تُضبط في لوحة Render، ولا تُحفظ في المستودع):
+
+| المتغير | الوصف |
+|---|---|
+| `DB_URL` | رابط Supabase Session pooler أعلاه |
+| `APP_KEY` | ناتج `php artisan key:generate --show` |
+| `OWNER_EMAIL` / `OWNER_PASSWORD` | بيانات المالك الأول (يُنشأ تلقائيًا عند الإقلاع) |
+| `CORS_ALLOWED_ORIGINS` | أصل الواجهة، مثل `https://safwt771754091s-crypto.github.io` |
+| `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | اختياري: لتشغيل المعلم الذكي على نموذج لغوي |
+
+> الأمان: لا تُزرع الحسابات التجريبية في بيئة الإنتاج (`APP_ENV=production`)، ويُنشأ
+> المالك فقط من `OWNER_EMAIL`/`OWNER_PASSWORD` عبر الأمر `platform:bootstrap-owner`.
+
+### 3) ربط الواجهة بالـ API وإعادة نشرها
+
+بعد ظهور رابط خدمة Render (مثل `https://yemeni-smart-teacher-api.onrender.com`)، اضبطه
+في `web/assets/config.js` داخل الثابت `PROD_API_ORIGIN`، ثم أعِد نشر فرع `gh-pages`:
 
 ```bash
 git worktree add --detach /tmp/ghpages
@@ -219,8 +254,8 @@ git add -A && git commit -m "deploy(web): point at permanent API" && git push or
 ```
 
 > بديل: أي مستضيف Docker يدعم PHP (Railway / Fly.io / VPS). على خطة Render المجانية تنام
-> الخدمة بعد فترة خمول وتستيقظ عند أول طلب، وقاعدة SQLite مؤقتة — للتشغيل الجدّي استخدم
-> MySQL عبر متغيرات `DB_CONNECTION=mysql` و`DB_HOST/DB_DATABASE/DB_USERNAME/DB_PASSWORD`.
+> الخدمة بعد فترة خمول وتستيقظ عند أول طلب. للتحقق من الاتصال: `php artisan platform:db-status`.
+
 
 ---
 

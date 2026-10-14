@@ -34,7 +34,12 @@
                 if (d && d.owner) platform.owner = d.owner;
                 if (d && d.repo) platform.repo = d.repo;
             })
-            .catch(() => {})
+            .catch((err) => {
+                // A reachable API that fails /config is non-fatal (branding
+                // defaults apply), but a network failure must surface so the
+                // boot screen can offer a retry.
+                if (err && err.isNetworkError) throw err;
+            })
             .then(applyBranding);
     }
 
@@ -966,12 +971,41 @@
     };
 
     // ---------------- Boot ----------------
-    applyBranding();
-    loadConfig().then(() => {
-        if (state.token && state.user) {
-            API.get('/auth/me').then((d) => { state.user = d.user; showApp(); }).catch(() => authScreen());
-        } else {
-            authScreen();
-        }
+    // A 401 anywhere in the app drops the local session and returns to login.
+    API.setUnauthorizedHandler(() => {
+        if (!el('loginForm')) authScreen();
     });
+
+    // Shown when the API cannot be reached at all (server down / no network),
+    // so the user sees a clear message instead of a blank page.
+    function connectionErrorScreen(err) {
+        view.innerHTML = `
+        <div class="card offline-card">
+            <h2>تعذّر الاتصال بالخادم</h2>
+            <p class="muted">لم نتمكن من الوصول إلى خدمة المنصة. تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.</p>
+            <p class="muted small">عنوان الخدمة: <code>${esc(API.API_BASE)}</code></p>
+            <button class="btn primary" id="retryBoot">إعادة المحاولة</button>
+        </div>`;
+        const retry = el('retryBoot');
+        if (retry) retry.onclick = () => boot();
+    }
+
+    function boot() {
+        const bootEl = el('boot');
+        if (bootEl) bootEl.classList.remove('hidden');
+        applyBranding();
+        loadConfig()
+            .then(() => {
+                if (state.token && state.user) {
+                    API.get('/auth/me')
+                        .then((d) => { state.user = d.user; showApp(); })
+                        .catch((err) => { if (err && err.isNetworkError) connectionErrorScreen(err); else authScreen(); });
+                } else {
+                    authScreen();
+                }
+            })
+            .catch((err) => connectionErrorScreen(err));
+    }
+
+    boot();
 })();

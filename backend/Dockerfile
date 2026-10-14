@@ -2,10 +2,11 @@
 FROM php:8.4-cli
 
 # System deps + PHP extensions used by the app (PDF parsing, mbstring, intl, gd, db).
+# pdo_pgsql is the production driver: the database is Supabase PostgreSQL.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip libzip-dev libicu-dev libpng-dev libonig-dev \
-        default-mysql-client \
-    && docker-php-ext-install -j"$(nproc)" pdo_mysql pdo_sqlite mbstring bcmath gd intl zip xml \
+        postgresql-client \
+    && docker-php-ext-install -j"$(nproc)" pdo_pgsql pdo_sqlite mbstring bcmath gd intl zip xml \
     && rm -rf /var/lib/apt/lists/*
 
 # Composer (from the official image).
@@ -28,8 +29,8 @@ RUN composer dump-autoload --optimize --no-dev \
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Default to SQLite so the image runs with zero external services; override
-# DB_CONNECTION=mysql + DB_* to use MySQL/MariaDB in production.
+# Default to SQLite so the image also runs with zero external services; in
+# production set DB_CONNECTION=pgsql + the Supabase connection variables.
 ENV APP_ENV=production \
     APP_DEBUG=false \
     DB_CONNECTION=sqlite \

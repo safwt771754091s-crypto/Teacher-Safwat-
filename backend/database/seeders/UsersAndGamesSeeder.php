@@ -32,6 +32,31 @@ class UsersAndGamesSeeder extends Seeder
         $grade1 = Grade::where('level', 1)->first();
         $grade2 = Grade::where('level', 2)->first();
 
+        $mathSubject = Subject::where('grade_id', $grade1?->id)->where('name', 'الرياضيات')->first();
+
+        // Demo accounts are a development convenience only. In production the
+        // owner is created through `php artisan platform:bootstrap-owner`
+        // (using an environment secret), and real accounts come from
+        // registration, so we never ship a default password.
+        if ($this->demoUsersEnabled()) {
+            $this->seedDemoUsers($grade1, $grade2, $mathSubject);
+        }
+
+        $this->seedGames($grade1, $mathSubject);
+        $this->seedAchievements();
+    }
+
+    /**
+     * Whether to create the shared demo accounts. Enabled everywhere except
+     * production, and can be forced with the SEED_DEMO_USERS env flag.
+     */
+    private function demoUsersEnabled(): bool
+    {
+        return (bool) config('platform.seed_demo_users');
+    }
+
+    private function seedDemoUsers(?Grade $grade1, ?Grade $grade2, ?Subject $mathSubject): void
+    {
         $owner = User::firstOrCreate(
             ['email' => 'owner@school.ye'],
             ['name' => config('platform.owner.name', 'المالك'), 'password' => Hash::make('password'), 'role' => User::ROLE_OWNER, 'status' => 'active'],
@@ -70,7 +95,6 @@ class UsersAndGamesSeeder extends Seeder
             ['relation' => 'father', 'status' => 'active'],
         );
 
-        $mathSubject = Subject::where('grade_id', $grade1?->id)->where('name', 'الرياضيات')->first();
         if ($teacher && $grade1 && $mathSubject) {
             TeacherAssignment::firstOrCreate([
                 'teacher_user_id' => $teacher->id,
@@ -78,7 +102,10 @@ class UsersAndGamesSeeder extends Seeder
                 'subject_id' => $mathSubject->id,
             ], ['section' => 'أ']);
         }
+    }
 
+    private function seedGames(?Grade $grade1, ?Subject $mathSubject): void
+    {
         // ---- Games ----
         $mathLessons = Lesson::whereHas('textbook.subject', function ($q) use ($mathSubject) {
             $q->where('id', $mathSubject?->id);
@@ -117,7 +144,10 @@ class UsersAndGamesSeeder extends Seeder
                 $g + ['grade_id' => $grade1?->id, 'subject_id' => $mathSubject?->id, 'lesson_id' => $firstMath?->id],
             );
         }
+    }
 
+    private function seedAchievements(): void
+    {
         foreach ([
             ['code' => 'first_steps', 'title' => 'الخطوة الأولى', 'icon' => 'star', 'criteria' => ['games' => 1]],
             ['code' => 'game_master', 'title' => 'لاعب ماهر', 'icon' => 'trophy', 'criteria' => ['games' => 5]],

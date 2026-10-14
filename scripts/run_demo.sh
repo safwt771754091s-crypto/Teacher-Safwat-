@@ -11,7 +11,7 @@ PHP_BIN="$(command -v php || true)"
 if [ -z "$PHP_BIN" ] && [ -x /usr/bin/php8.4 ]; then PHP_BIN=/usr/bin/php8.4; fi
 if [ -z "$PHP_BIN" ]; then echo "PHP not found. Run scripts/bootstrap_env.sh first."; exit 1; fi
 
-(sudo service mariadb start >/dev/null 2>&1 || true)
+(sudo service postgresql start >/dev/null 2>&1 || true)
 (sudo service redis-server start >/dev/null 2>&1 || true)
 
 API_PUBLIC="${API_PUBLIC_URL:-http://127.0.0.1:12000}"

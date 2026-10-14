@@ -3,7 +3,7 @@ set -e
 
 cd /app
 
-# Create the SQLite database file on first boot (Render free tier, no MySQL).
+# SQLite fallback: create the database file on first boot (local/no-services).
 if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then
     touch "${DB_DATABASE:-/app/database/database.sqlite}"
 fi
@@ -16,10 +16,16 @@ fi
 
 php artisan config:clear >/dev/null 2>&1 || true
 
-# Migrate + seed. Seeding is idempotent, so it is safe to run on every boot and
-# guarantees a fresh database is usable even after the free-tier disk is wiped.
+# Migrate + seed. Seeding is idempotent and, in production, skips the demo
+# accounts (see UsersAndGamesSeeder) so no default password is ever created.
 php artisan migrate --force
 php artisan db:seed --force
+
+# Create the owner from environment secrets when provided. This is how the
+# first production owner is created without shipping credentials in the image.
+if [ -n "${OWNER_EMAIL:-}" ] && [ -n "${OWNER_PASSWORD:-}" ]; then
+    php artisan platform:bootstrap-owner || echo "owner bootstrap skipped"
+fi
 
 # Cache config/routes for production.
 php artisan config:cache
