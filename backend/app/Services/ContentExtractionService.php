@@ -361,7 +361,7 @@ class ContentExtractionService
 
     private function isLessonHeading(string $line): bool
     {
-        return (bool) preg_match('/^الدرس\b/u', $line);
+        return (bool) preg_match('/^الدرس(?=\s|[:،؛]|$)/u', $line);
     }
 
     /**
@@ -427,7 +427,7 @@ class ContentExtractionService
 
     private function isUnitHeading(string $line): bool
     {
-        return (bool) preg_match('/^(الوحدة|الموضوع|المحور|الفصل)\b/u', $line);
+        return (bool) preg_match('/^(الوحدة|الموضوع|المحور|الفصل)(?=\s|[:،؛]|$)/u', $line);
     }
 
     /**
@@ -436,7 +436,7 @@ class ContentExtractionService
      */
     private function isActivityHeading(string $line): bool
     {
-        return (bool) preg_match('/^نشاط\b/u', $line);
+        return (bool) preg_match('/^نشاط(?=\s|[:،؛]|$)/u', $line);
     }
 
     /**
