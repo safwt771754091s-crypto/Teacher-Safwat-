@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -85,6 +86,15 @@ class TtsService
     private function fetch(string $text, string $lang): ?string
     {
         $base = rtrim((string) config('platform.tts.base_url'), '/');
+
+        // The same phrases recur constantly (feedback, lesson openers), so cache
+        // the audio to cut both upstream cost and playback latency.
+        $key = 'tts:' . $lang . ':' . md5($text);
+        $cached = Cache::get($key);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
         try {
             $res = Http::timeout((int) config('platform.tts.timeout', 20))
                 ->withHeaders(['User-Agent' => 'Mozilla/5.0'])
@@ -104,6 +114,12 @@ class TtsService
 
         $body = $res->body();
         // Guard against an HTML error page masquerading as audio.
-        return strlen($body) > 512 ? $body : null;
+        if (strlen($body) <= 512) {
+            return null;
+        }
+
+        Cache::put($key, $body, now()->addDays(30));
+
+        return $body;
     }
 }

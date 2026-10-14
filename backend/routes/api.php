@@ -49,7 +49,8 @@ Route::prefix('v1')->group(function () {
     Route::get('lessons/{lesson}/pages/{page}', [CurriculumController::class, 'pageSource']);
     Route::get('lessons/{lesson}/pages/{page}/image', [CurriculumController::class, 'pageImage']);
     // Server-side Arabic TTS (used when the device has no Arabic voice).
-    Route::get('tts', [AudioController::class, 'speech']);
+    // Throttled because each call hits a paid upstream synthesis service.
+    Route::get('tts', [AudioController::class, 'speech'])->middleware('throttle:120,1');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('auth/me', [AuthController::class, 'me']);
