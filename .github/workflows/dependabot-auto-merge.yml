@@ -1,0 +1,64 @@
+name: Dependabot auto-merge
+
+# Merges Dependabot pull requests only after the "CI" workflow (the test
+# suite) has finished successfully, so a dependency bump never lands while
+# the tests are red.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  auto-merge:
+    # Only act on pull-request CI runs that succeeded.
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find the Dependabot pull request
+        id: pr
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const head = context.payload.workflow_run.head_branch;
+            const sha = context.payload.workflow_run.head_sha;
+            if (!head.startsWith('dependabot/')) {
+              core.info(`Not a Dependabot branch (${head}); nothing to do.`);
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const { data: prs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:${head}`,
+            });
+            // Merge only the commit CI actually tested, and never a draft.
+            const pr = prs.find(
+              (p) =>
+                p.user.login === 'dependabot[bot]' &&
+                p.head.sha === sha &&
+                !p.draft
+            );
+            if (!pr) {
+              core.info(`No matching open Dependabot PR for ${head}@${sha}.`);
+              return;
+            }
+            core.info(`Found Dependabot PR #${pr.number} (${pr.html_url}).`);
+            core.setOutput('url', pr.html_url);
+            core.setOutput('number', String(pr.number));
+
+      - name: Merge the pull request
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          echo "CI passed - merging $PR_URL"
+          gh pr merge --squash --delete-branch "$PR_URL"
