@@ -10,8 +10,8 @@
  * Book files themselves live in Supabase Storage and are pulled on demand, so
  * the app never ships the whole curriculum to every device.
  */
-const SHELL_CACHE = 'ts-shell-v5';
-const RUNTIME_CACHE = 'ts-runtime-v5';
+const SHELL_CACHE = 'ts-shell-v6';
+const RUNTIME_CACHE = 'ts-runtime-v6';
 const BOOKS_CACHE = 'ts-books-v1';
 const SHELL_ASSETS = [
     './',
@@ -80,6 +80,11 @@ self.addEventListener('fetch', (event) => {
     if (request.method !== 'GET') return;
 
     const url = new URL(request.url);
+
+    // Cross-origin requests (e.g. textbook pages on the Supabase Storage CDN)
+    // are left to the browser: it can use its own HTTP cache and follow
+    // redirects, and we avoid caching opaque cross-origin responses here.
+    if (url.origin !== self.location.origin) return;
 
     // Curriculum API: always try the network, fall back to the last copy (the
     // runtime cache, or a book the user saved for offline).
