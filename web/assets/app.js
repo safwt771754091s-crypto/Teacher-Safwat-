@@ -695,13 +695,13 @@
         let cur = from;
 
         function show() {
-            const url = `${API.API_BASE}/lessons/${lesson.id}/pages/${cur}/image`;
+            const proxyUrl = `${API.API_BASE}/lessons/${lesson.id}/pages/${cur}/image`;
             el('modalBody').innerHTML = `
                 <h3>${esc(lesson.title)}</h3>
                 <p class="muted small">صفحة ${cur} من ${to} · ${esc(lesson.textbook.subject.name)}</p>
                 <div class="page-viewer">
                     <button class="btn ghost" id="pgPrev" ${cur <= from ? 'disabled' : ''}>›</button>
-                    <div class="page-frame"><img id="pgImg" class="page-img" alt="صفحة ${cur}" src="${url}">
+                    <div class="page-frame"><img id="pgImg" class="page-img" alt="صفحة ${cur}">
                         <div id="pgMsg" class="muted small hidden">جارٍ تحميل الصفحة…</div></div>
                     <button class="btn ghost" id="pgNext" ${cur >= to ? 'disabled' : ''}>‹</button>
                 </div>
@@ -714,12 +714,29 @@
             const img = el('pgImg');
             const msg = el('pgMsg');
             msg.classList.remove('hidden');
+
+            // Prefer the stored page image straight from Supabase Storage (CDN)
+            // to spare the API; fall back to the on-demand API render when the
+            // page is not stored yet or the direct URL fails.
             img.onload = () => msg.classList.add('hidden');
             img.onerror = () => {
-                img.classList.add('hidden');
-                msg.classList.remove('hidden');
-                msg.textContent = 'تعذّر عرض هذه الصفحة. حمّل الكتاب كاملًا من الزر أدناه.';
+                if (img.dataset.fellback) {
+                    img.classList.add('hidden');
+                    msg.classList.remove('hidden');
+                    msg.textContent = 'تعذّر عرض هذه الصفحة. حمّل الكتاب كاملًا من الزر أدناه.';
+                    return;
+                }
+                img.dataset.fellback = '1';
+                img.src = proxyUrl;
             };
+            img.src = proxyUrl;
+
+            (async () => {
+                try {
+                    const r = await API.get(`/lessons/${lesson.id}/pages/${cur}`);
+                    if (r && r.image_url && !img.dataset.fellback) img.src = r.image_url;
+                } catch (e) { /* keep the proxy URL */ }
+            })();
 
             if (el('pgPrev')) el('pgPrev').onclick = () => { if (cur > from) { cur--; show(); } };
             if (el('pgNext')) el('pgNext').onclick = () => { if (cur < to) { cur++; show(); } };
