@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Laravel/PHP dependencies (backend/composer.lock).
+  - package-ecosystem: composer
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Front-end build tooling (backend/package.json).
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # Keep the Actions used by the workflows up to date too.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
