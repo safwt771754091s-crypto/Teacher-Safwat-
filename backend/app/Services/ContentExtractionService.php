@@ -216,6 +216,39 @@ class ContentExtractionService
     }
 
     /**
+     * Public URL of a page image already stored on the textbook disk, or null
+     * when there is none (so the caller renders it on demand instead).
+     *
+     * Only a cloud disk (Supabase Storage / S3) yields a direct URL: its objects
+     * are publicly readable, so the browser can load book pages from the CDN and
+     * skip the API. The local disk is deliberately not linked into the API's web
+     * root, so it always falls back to the on-demand PNG served by the API.
+     */
+    public function pageImageUrl(Textbook $textbook, int $pageNumber): ?string
+    {
+        $diskName = config('platform.storage.textbook_disk', 'public');
+        if (config("filesystems.disks.{$diskName}.driver") === 'local') {
+            return null;
+        }
+
+        $page = $textbook->pages()->where('page_number', $pageNumber)->first();
+        if (! $page || ! $page->image_path) {
+            return null;
+        }
+
+        try {
+            $disk = Storage::disk($diskName);
+            if (! $disk->exists($page->image_path)) {
+                return null;
+            }
+
+            return $disk->url($page->image_path);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * Persist a rendered page image and remember its path on the page row.
      */
     private function cachePageImage(Textbook $textbook, int $pageNumber, string $png): void
