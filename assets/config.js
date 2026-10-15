@@ -14,7 +14,7 @@
 (function () {
     // Origin of the deployed API. Leave empty until the API host is known; the
     // app then falls back to the meta tag / paired host / localhost.
-    var PROD_API_ORIGIN = "https://work-1-uiupswnlbcdgccgq.prod-runtime.all-hands.dev";
+    var PROD_API_ORIGIN = "https://yemeni-smart-teacher-api.onrender.com";
 
     function withApi(origin) {
         return String(origin).replace(/\/+$/, "") + "/api/v1";

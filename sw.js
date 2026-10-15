@@ -10,8 +10,8 @@
  * Book files themselves live in Supabase Storage and are pulled on demand, so
  * the app never ships the whole curriculum to every device.
  */
-const SHELL_CACHE = 'ts-shell-v6';
-const RUNTIME_CACHE = 'ts-runtime-v6';
+const SHELL_CACHE = 'ts-shell-v7';
+const RUNTIME_CACHE = 'ts-runtime-v7';
 const BOOKS_CACHE = 'ts-books-v1';
 const SHELL_ASSETS = [
     './',
