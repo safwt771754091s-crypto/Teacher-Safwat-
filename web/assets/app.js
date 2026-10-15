@@ -325,6 +325,7 @@
             <button class="btn primary" id="btnExplain">🧠 اشرح لي الدرس</button>
             <button class="btn" id="btnSummary">📝 الملخص</button>
             <button class="btn" id="btnAudio">🔊 استمع للدرس</button>
+            <button class="btn" id="btnPages">📖 صفحات الكتاب</button>
         </div>
         <div id="teacherOut" class="teacher-out hidden"></div>
 
@@ -377,6 +378,7 @@
                 speak(r.text);
             } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
         };
+        el('btnPages').onclick = () => openBookPages(lesson);
         el('askBtn').onclick = () => ask(id);
         el('askInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(id); });
         el('micBtn').onclick = () => startVoiceAsk(id);
@@ -511,42 +513,91 @@
             : 'No speech voice available on this device.');
     }
 
+    function splitChunks(text) {
+        // Split into bilingual chunks so English words are read in English and
+        // the Arabic explanation/translation in Arabic. A NUL marker is inserted
+        // at sentence/dash/newline boundaries instead of using a regex
+        // lookbehind, which is a syntax error on older Safari/WebView.
+        const chunks = String(text)
+            .replace(/([.!?؟،])\s+/g, '$1\u0000')
+            .replace(/\s+—\s+|\n+/g, '\u0000')
+            .split('\u0000')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        return chunks.length ? chunks : [String(text)];
+    }
+
+    const hasArabic = (s) => /[\u0600-\u06FF]/.test(s);
+
+    // Server-side Arabic TTS fallback: many phones ship without an Arabic voice,
+    // so SpeechSynthesis stays silent for Arabic. When that happens we stream
+    // the narration from the API's /tts endpoint and play it with <audio>.
+    let serverAudio = null;
+    let serverAudioCancelled = false;
+
+    function stopServerAudio() {
+        serverAudioCancelled = true;
+        if (serverAudio) {
+            try { serverAudio.pause(); } catch (e) {}
+            serverAudio = null;
+        }
+    }
+
+    function speakViaServer(chunks) {
+        stopServerAudio();
+        serverAudioCancelled = false;
+        let i = 0;
+        const next = () => {
+            if (serverAudioCancelled || i >= chunks.length) return;
+            const chunk = chunks[i++];
+            const url = API.API_BASE + '/tts?lang=ar&text=' + encodeURIComponent(chunk);
+            const audio = new Audio(url);
+            serverAudio = audio;
+            audio.onended = next;
+            // A chunk that fails to synthesise should not stop the rest.
+            audio.onerror = next;
+            audio.play().catch(() => { serverAudioCancelled = true; warnNoVoice('ar-SA'); });
+        };
+        next();
+    }
+
     function speak(text) {
-        if (!voiceEnabled || !('speechSynthesis' in window) || !text) return;
-        try {
-            speechSynthesis.cancel();
-            // Split into bilingual chunks so English words are read in English
-            // and the Arabic explanation/translation in Arabic. A NUL marker is
-            // inserted at sentence/dash/newline boundaries instead of using a
-            // regex lookbehind, which is a syntax error on older Safari/WebView.
-            const chunks = String(text)
-                .replace(/([.!?؟،])\s+/g, '$1\u0000')
-                .replace(/\s+—\s+|\n+/g, '\u0000')
-                .split('\u0000')
-                .map((s) => s.trim())
-                .filter(Boolean);
-            (chunks.length ? chunks : [String(text)]).forEach((chunk) => {
-                const latin = (chunk.match(/[A-Za-z]/g) || []).length;
-                const arabic = (chunk.match(/[\u0600-\u06FF]/g) || []).length;
-                const lang = latin > 0 && latin >= arabic ? 'en-US' : 'ar-SA';
-                const u = new SpeechSynthesisUtterance(chunk);
-                const voice = pickVoice(lang);
-                if (voice) u.voice = voice;
-                u.lang = lang;
-                u.rate = 0.95;
-                speechSynthesis.speak(u);
-            });
-            // If voices are known but none is Arabic, the device cannot read the
-            // Arabic explanation — tell the user rather than staying silent.
-            if (voices.length && chunks.some((c) => (c.match(/[\u0600-\u06FF]/g) || []).length > 0) && !pickVoice('ar-SA')) {
-                warnNoVoice('ar-SA');
+        if (!voiceEnabled || !text) return;
+        const chunks = splitChunks(text);
+        const arabic = chunks.some(hasArabic);
+
+        if ('speechSynthesis' in window) {
+            if (!voices.length) loadVoices();
+            // Use the on-device voice when it can read Arabic (free, offline);
+            // otherwise hand the Arabic narration to the server.
+            if (!arabic || pickVoice('ar-SA')) {
+                try {
+                    speechSynthesis.cancel();
+                    chunks.forEach((chunk) => {
+                        const latin = (chunk.match(/[A-Za-z]/g) || []).length;
+                        const ar = (chunk.match(/[\u0600-\u06FF]/g) || []).length;
+                        const lang = latin > 0 && latin >= ar ? 'en-US' : 'ar-SA';
+                        const u = new SpeechSynthesisUtterance(chunk);
+                        const voice = pickVoice(lang);
+                        if (voice) u.voice = voice;
+                        u.lang = lang;
+                        u.rate = 0.95;
+                        speechSynthesis.speak(u);
+                    });
+                    return;
+                } catch (e) {
+                    // fall through to the server voice
+                }
             }
-        } catch (e) {}
+        }
+
+        if (arabic) speakViaServer(chunks);
     }
 
     // Stop any speech currently playing (used by the audio toggle / navigation).
     function stopSpeaking() {
         if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch (e) {} }
+        stopServerAudio();
     }
 
     function startVoiceAsk(lessonId) {
@@ -633,6 +684,66 @@
         renderQ();
     }
     el('modal').onclick = (e) => { if (e.target.id === 'modal') el('modal').classList.add('hidden'); };
+
+    // ---------------- Book page viewer ----------------
+    // Shows the lesson's actual textbook pages (rendered server-side from the
+    // book's source PDF) so the student reads the real page, not only the
+    // extracted points.
+    function openBookPages(lesson) {
+        const from = lesson.page_from || 1;
+        const to = Math.max(from, lesson.page_to || from);
+        let cur = from;
+
+        function show() {
+            const proxyUrl = `${API.API_BASE}/lessons/${lesson.id}/pages/${cur}/image`;
+            el('modalBody').innerHTML = `
+                <h3>${esc(lesson.title)}</h3>
+                <p class="muted small">صفحة ${cur} من ${to} · ${esc(lesson.textbook.subject.name)}</p>
+                <div class="page-viewer">
+                    <button class="btn ghost" id="pgPrev" ${cur <= from ? 'disabled' : ''}>›</button>
+                    <div class="page-frame"><img id="pgImg" class="page-img" alt="صفحة ${cur}">
+                        <div id="pgMsg" class="muted small hidden">جارٍ تحميل الصفحة…</div></div>
+                    <button class="btn ghost" id="pgNext" ${cur >= to ? 'disabled' : ''}>‹</button>
+                </div>
+                <div class="action-row center">
+                    <a class="btn small" href="${API.API_BASE}/textbooks/${lesson.textbook_id}/download?format=pdf" download>⬇️ تحميل الكتاب كامل</a>
+                    <button class="btn primary" id="closeModal">إغلاق</button>
+                </div>`;
+            el('modal').classList.remove('hidden');
+
+            const img = el('pgImg');
+            const msg = el('pgMsg');
+            msg.classList.remove('hidden');
+
+            // Prefer the stored page image straight from Supabase Storage (CDN)
+            // to spare the API; fall back to the on-demand API render when the
+            // page is not stored yet or the direct URL fails.
+            img.onload = () => msg.classList.add('hidden');
+            img.onerror = () => {
+                if (img.dataset.fellback) {
+                    img.classList.add('hidden');
+                    msg.classList.remove('hidden');
+                    msg.textContent = 'تعذّر عرض هذه الصفحة. حمّل الكتاب كاملًا من الزر أدناه.';
+                    return;
+                }
+                img.dataset.fellback = '1';
+                img.src = proxyUrl;
+            };
+            img.src = proxyUrl;
+
+            (async () => {
+                try {
+                    const r = await API.get(`/lessons/${lesson.id}/pages/${cur}`);
+                    if (r && r.image_url && !img.dataset.fellback) img.src = r.image_url;
+                } catch (e) { /* keep the proxy URL */ }
+            })();
+
+            if (el('pgPrev')) el('pgPrev').onclick = () => { if (cur > from) { cur--; show(); } };
+            if (el('pgNext')) el('pgNext').onclick = () => { if (cur < to) { cur++; show(); } };
+            el('closeModal').onclick = () => el('modal').classList.add('hidden');
+        }
+        show();
+    }
 
     // ---------------- Student: progress ----------------
     routes['progress'] = async function progressScreen() {

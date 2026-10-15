@@ -75,6 +75,10 @@ return [
             'endpoint' => env('SUPABASE_S3_ENDPOINT', 'https://'.env('SUPABASE_PROJECT_REF', 'jsrpfsybgeplciiqjzqr').'.storage.supabase.co/storage/v1/s3'),
             'use_path_style_endpoint' => true,
             'visibility' => 'public',
+            // The S3 endpoint URL is not browsable, so give the disk its real
+            // public object base. Book pages load straight from here (the CDN)
+            // instead of being proxied by the API.
+            'url' => env('SUPABASE_STORAGE_URL', 'https://'.env('SUPABASE_PROJECT_REF', 'jsrpfsybgeplciiqjzqr').'.supabase.co/storage/v1/object/public'),
             'throw' => false,
             'report' => false,
         ],

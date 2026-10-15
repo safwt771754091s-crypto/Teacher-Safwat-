@@ -70,6 +70,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Textbook page images (in-app viewer)
+    |--------------------------------------------------------------------------
+    | When a book has no stored page image, its source PDF page is rasterised on
+    | demand for the viewer. A moderate DPI keeps pages crisp on phones while
+    | staying small enough for slow connections.
+    */
+    'page_image' => [
+        'dpi' => (int) env('PAGE_IMAGE_DPI', 130),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Server-side Arabic text-to-speech
+    |--------------------------------------------------------------------------
+    | Fallback narration for devices with no Arabic TTS voice installed. The
+    | client uses its on-device SpeechSynthesis first (free, offline) and only
+    | calls the server when no Arabic voice is available, so the audio works on
+    | every device. The spoken text is always the approved lesson content.
+    */
+    'tts' => [
+        'enabled' => (bool) env('TTS_ENABLED', true),
+        'base_url' => env('TTS_BASE_URL', 'https://translate.google.com/translate_tts'),
+        'client' => env('TTS_CLIENT', 'tw-ob'),
+        'timeout' => (int) env('TTS_TIMEOUT', 20),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Arabic OCR (for scanned textbook pages)
     |--------------------------------------------------------------------------
     | Many official Yemeni textbook PDFs are scanned images with no embedded

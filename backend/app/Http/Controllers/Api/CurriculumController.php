@@ -7,6 +7,7 @@ use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\Subject;
 use App\Models\Textbook;
+use App\Services\ContentExtractionService;
 use App\Services\TextbookExportService;
 use Illuminate\Http\Request;
 
@@ -49,12 +50,48 @@ class CurriculumController extends Controller
         return response()->json(['lesson' => $lesson]);
     }
 
-    public function pageSource(Lesson $lesson, int $page)
+    public function pageSource(Lesson $lesson, int $page, ContentExtractionService $extractor)
     {
         $textbook = $lesson->textbook;
         $pageRow = $textbook->pages()->where('page_number', $page)->first();
         abort_if(! $pageRow, 404, 'الصفحة غير موجودة.');
-        return response()->json(['page' => $pageRow]);
+
+        return response()->json([
+            'page' => $pageRow,
+            // Direct CDN URL for the page image when it is already stored (so the
+            // client can bypass the API); null means it must be rendered on demand.
+            'image_url' => $extractor->pageImageUrl($textbook, $page),
+        ]);
+    }
+
+    /**
+     * Serve one textbook page as a PNG so the lesson screen can show the book
+     * page itself (not only extracted text). Rendered on demand from the book's
+     * source PDF and cached for a day, since textbook pages never change.
+     *
+     * When the page image is already stored on a cloud disk (Supabase Storage),
+     * the client is redirected straight to its public CDN URL — the API does not
+     * proxy the bytes. A local disk (or a page that still needs rendering) is
+     * served as PNG bytes here instead.
+     */
+    public function pageImage(Lesson $lesson, int $page, ContentExtractionService $extractor)
+    {
+        $textbook = $lesson->textbook;
+        abort_if($page < 1, 404, 'الصفحة غير موجودة.');
+
+        $url = $extractor->pageImageUrl($textbook, $page);
+        if ($url !== null) {
+            return redirect()->away($url, 302);
+        }
+
+        $png = $extractor->pageImage($textbook, $page);
+        abort_if($png === null, 404, 'تعذّر عرض هذه الصفحة.');
+
+        return response($png, 200, [
+            'Content-Type' => 'image/png',
+            'Content-Length' => (string) strlen($png),
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
     }
 
     /**
