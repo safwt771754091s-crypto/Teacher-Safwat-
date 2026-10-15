@@ -320,15 +320,15 @@ php artisan platform:db-status
 ### 3) ربط الواجهة بالـ API وإعادة نشرها
 
 بعد ظهور رابط خدمة Render (مثل `https://yemeni-smart-teacher-api.onrender.com`)، اضبطه
-في `web/assets/config.js` داخل الثابت `PROD_API_ORIGIN`، ثم أعِد نشر فرع `gh-pages`:
+في `web/assets/config.js` داخل الثابت `PROD_API_ORIGIN` (أو عبر وسم `<meta name="api-base">`
+في `web/index.html`).
 
-```bash
-git worktree add --detach /tmp/ghpages
-cd /tmp/ghpages && git checkout --orphan gh-pages
-find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-cp -r /workspace/project/web/. .
-git add -A && git commit -m "deploy(web): point at permanent API" && git push origin gh-pages
-```
+ثم ادمج التغيير في `main`؛ فسطر النشر الآلي
+(`.github/workflows/deploy-pages.yml`) ينسخ مجلد `web/` إلى فرع `gh-pages` تلقائيًا
+عند كل تغيير فيه، ولا حاجة لأي خطوة يدوية.
+
+> إن أردت النشر يدويًا: انسخ `web/` إلى فرع `gh-pages` (`git worktree add --detach /tmp/ghpages`
+> ثم `cp -r web/. /tmp/ghpages/` والدفع)، أو شغّل سير العمل من تبويب Actions (`workflow_dispatch`).
 
 > بديل: أي مستضيف Docker يدعم PHP (Railway / Fly.io / VPS). على خطة Render المجانية تنام
 > الخدمة بعد فترة خمول وتستيقظ عند أول طلب. للتحقق من الاتصال: `php artisan platform:db-status`.
