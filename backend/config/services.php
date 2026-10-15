@@ -35,4 +35,18 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Supabase
+    |--------------------------------------------------------------------------
+    | The publishable key is safe to hand to browsers (it only grants what
+    | row-level security and public storage allow), so it is exposed through
+    | the public GET /api/v1/config endpoint. Never put the service-role key
+    | here — that one must stay server-side only.
+    */
+    'supabase' => [
+        'url' => env('SUPABASE_URL'),
+        'publishable_key' => env('SUPABASE_ANON_KEY'),
+    ],
+
 ];

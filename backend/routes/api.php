@@ -31,6 +31,10 @@ Route::prefix('v1')->group(function () {
                 'name' => config('platform.repo.name'),
                 'url' => config('platform.repo.url'),
             ],
+            'supabase' => [
+                'url' => config('services.supabase.url'),
+                'publishable_key' => config('services.supabase.publishable_key'),
+            ],
             'offline' => $registry->offlineReadiness(),
         ]);
     });

@@ -20,6 +20,28 @@
         return String(origin).replace(/\/+$/, "") + "/api/v1";
     }
 
+    // Supabase client coordinates (public/publishable — safe in the browser).
+    // GET /api/v1/config returns these so the SPA needs no rebuild to point at
+    // a different project. Values are filled in lazily by fetchSupabaseConfig().
+    window.SUPABASE_URL = window.SUPABASE_URL || "";
+    window.SUPABASE_PUBLISHABLE_KEY = window.SUPABASE_PUBLISHABLE_KEY || "";
+    window.fetchSupabaseConfig = function () {
+        return fetch(window.API_BASE_URL + "/config", {
+            headers: { "Accept": "application/json" },
+        })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (cfg) {
+                if (cfg && cfg.supabase) {
+                    if (cfg.supabase.url) window.SUPABASE_URL = cfg.supabase.url;
+                    if (cfg.supabase.publishable_key) {
+                        window.SUPABASE_PUBLISHABLE_KEY = cfg.supabase.publishable_key;
+                    }
+                }
+                return window.SUPABASE_URL;
+            })
+            .catch(function () { return null; });
+    };
+
     var override = window.API_BASE_URL_OVERRIDE;
     if (override) {
         window.API_BASE_URL = withApi(override);
