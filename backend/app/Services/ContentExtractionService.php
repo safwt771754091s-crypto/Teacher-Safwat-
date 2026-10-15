@@ -181,6 +181,141 @@ class ContentExtractionService
     }
 
     /**
+     * Render one page of a textbook as a PNG image (bytes), for the in-app page
+     * viewer. Prefers a stored page image; otherwise rasterises the page from
+     * the book's source PDF (stored file or downloaded from its source URL).
+     *
+     * @return string|null PNG bytes, or null when the page cannot be produced.
+     */
+    public function pageImage(Textbook $textbook, int $pageNumber): ?string
+    {
+        $page = $textbook->pages()->where('page_number', $pageNumber)->first();
+
+        // 1. A stored page image is already the source of record.
+        if ($page && $page->image_path) {
+            try {
+                $disk = Storage::disk(config('platform.storage.textbook_disk', 'public'));
+                if ($disk->exists($page->image_path)) {
+                    return $this->asPng($disk->get($page->image_path));
+                }
+            } catch (\Throwable $e) {
+                // fall through to PDF rendering
+            }
+        }
+
+        // 2. Render from the book's PDF, then cache the PNG on the storage disk
+        //    so later views (and other students) skip the download + rasterise.
+        $png = $this->withTextbookPdf($textbook, fn (string $pdf) => $this->renderPdfPage($pdf, $pageNumber));
+        if ($png === null) {
+            return null;
+        }
+
+        $this->cachePageImage($textbook, $pageNumber, $png);
+
+        return $png;
+    }
+
+    /**
+     * Persist a rendered page image and remember its path on the page row.
+     */
+    private function cachePageImage(Textbook $textbook, int $pageNumber, string $png): void
+    {
+        try {
+            $path = "textbooks/{$textbook->id}/pages/{$pageNumber}.png";
+            $disk = Storage::disk(config('platform.storage.textbook_disk', 'public'));
+            $disk->put($path, $png);
+
+            TextbookPage::updateOrCreate(
+                ['textbook_id' => $textbook->id, 'page_number' => $pageNumber],
+                ['image_path' => $path],
+            );
+        } catch (\Throwable $e) {
+            // Caching is best-effort; the rendered bytes are returned regardless.
+        }
+    }
+
+    /**
+     * Resolve the textbook's PDF to a local path and run the callback with it.
+     * The file may live on the storage disk or be fetched from `source_url`;
+     * any temporary copy is removed afterwards.
+     */
+    public function withTextbookPdf(Textbook $textbook, callable $fn)
+    {
+        if (! $this->binaryExists(config('platform.ocr.pdftoppm'))) {
+            return null;
+        }
+
+        if ($textbook->file_path) {
+            return $this->withLocalFile($textbook->file_path, $fn);
+        }
+
+        if (! $textbook->source_url) {
+            return null;
+        }
+
+        $temp = tempnam(sys_get_temp_dir(), 'tbk_pdf_');
+        try {
+            @shell_exec(sprintf(
+                'curl -sL --fail --max-time 120 -o %s %s 2>/dev/null',
+                escapeshellarg($temp),
+                escapeshellarg($textbook->source_url),
+            ));
+            if (! is_file($temp) || filesize($temp) < 1024) {
+                return null;
+            }
+
+            return $fn($temp);
+        } finally {
+            if (is_file($temp)) {
+                @unlink($temp);
+            }
+        }
+    }
+
+    /**
+     * Rasterise a single PDF page to PNG bytes using pdftoppm.
+     */
+    private function renderPdfPage(string $pdfPath, int $pageNumber): ?string
+    {
+        $tmp = sys_get_temp_dir() . '/pg_' . bin2hex(random_bytes(6));
+        try {
+            @shell_exec(sprintf(
+                '%s -f %d -l %d -r %d -png -singlefile %s %s 2>/dev/null',
+                escapeshellarg(config('platform.ocr.pdftoppm')),
+                $pageNumber,
+                $pageNumber,
+                (int) config('platform.page_image.dpi', 130),
+                escapeshellarg($pdfPath),
+                escapeshellarg($tmp),
+            ));
+            $png = $tmp . '.png';
+
+            return is_file($png) ? (string) file_get_contents($png) : null;
+        } finally {
+            if (is_file($tmp . '.png')) {
+                @unlink($tmp . '.png');
+            }
+        }
+    }
+
+    /**
+     * Normalise arbitrary image bytes to PNG (the viewer requests PNG).
+     */
+    private function asPng(string $bytes): ?string
+    {
+        $img = @imagecreatefromstring($bytes);
+        if (! $img) {
+            return null;
+        }
+        ob_start();
+        imagepng($img, null, 6);
+        $png = (string) ob_get_clean();
+        imagedestroy($img);
+
+        return $png;
+    }
+
+    /**
      * Resolve a stored file to a real local path, downloading it to a temp file
      * when the disk is remote (e.g. Supabase/S3). The callback receives the path;
      * any temp copy is always removed afterwards.

@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Http;
  */
 class AudioService
 {
-    public function __construct(private AiTeacherService $ai)
+    public function __construct(private AiTeacherService $ai, private TtsService $tts)
     {
     }
 
@@ -33,12 +33,14 @@ class AudioService
             'status' => 'ready',
         ]);
 
-        $provider = config('platform.ai.provider');
-        $apiKey = config('platform.ai.api_key');
-
         return [
             'asset_id' => $asset->id,
             'mode' => 'client_synthesis',
+            'provider' => config('platform.tts.enabled') ? 'server' : 'device',
+            // Ordered speakable parts: the client reads them in sequence with the
+            // device voice, or fetches each as MP3 from the TTS endpoint when the
+            // device has no Arabic voice.
+            'chunks' => $this->tts->chunk($text),
             'text' => $text,
             'speed' => $speed,
             'duration_hint' => $this->estimateSeconds($text, $speed),

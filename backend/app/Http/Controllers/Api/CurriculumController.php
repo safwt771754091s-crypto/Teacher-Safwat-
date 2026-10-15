@@ -7,6 +7,7 @@ use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\Subject;
 use App\Models\Textbook;
+use App\Services\ContentExtractionService;
 use App\Services\TextbookExportService;
 use Illuminate\Http\Request;
 
@@ -55,6 +56,26 @@ class CurriculumController extends Controller
         $pageRow = $textbook->pages()->where('page_number', $page)->first();
         abort_if(! $pageRow, 404, 'الصفحة غير موجودة.');
         return response()->json(['page' => $pageRow]);
+    }
+
+    /**
+     * Serve one textbook page as a PNG so the lesson screen can show the book
+     * page itself (not only extracted text). Rendered on demand from the book's
+     * source PDF and cached for a day, since textbook pages never change.
+     */
+    public function pageImage(Lesson $lesson, int $page, ContentExtractionService $extractor)
+    {
+        $textbook = $lesson->textbook;
+        abort_if($page < 1, 404, 'الصفحة غير موجودة.');
+
+        $png = $extractor->pageImage($textbook, $page);
+        abort_if($png === null, 404, 'تعذّر عرض هذه الصفحة.');
+
+        return response($png, 200, [
+            'Content-Type' => 'image/png',
+            'Content-Length' => (string) strlen($png),
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
     }
 
     /**
