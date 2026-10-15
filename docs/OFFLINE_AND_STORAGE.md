@@ -24,6 +24,23 @@ SUPABASE_S3_SECRET_ACCESS_KEY=...
 
 مفاتيح S3 تُنشأ من لوحة Supabase: **Project Settings → Storage → S3 access keys**.
 
+### إنشاء الحاوية من الطرفية
+
+المفتاح القابل للنشر (publishable/anon) **لا يستطيع** إنشاء الحاويات — ترفضه سياسات
+RLS (HTTP 403). تحتاج مفتاحًا مرتفع الصلاحية، ثم شغّل السكربت الجاهز:
+
+```bash
+# عبر رمز الوصول الشخصي (Account → Access Tokens)
+SUPABASE_ACCESS_TOKEN=sbp_xxx bash scripts/create_supabase_bucket.sh
+
+# أو عبر مفتاح service_role الخاص بالمشروع (Project Settings → API)
+SUPABASE_SERVICE_ROLE_KEY=eyJ... bash scripts/create_supabase_bucket.sh
+```
+
+السكربت `scripts/create_supabase_bucket.sh` **idempotent**: إن وُجدت الحاوية مسبقًا
+يعتبر ذلك نجاحًا. وبديلًا عنه يمكنك إنشاء الحاوية يدويًا من اللوحة:
+**Storage → New bucket → الاسم `textbooks` → Public**.
+
 ### لماذا لا يتغيّر أي منطق عند التبديل؟
 الخدمة `ContentExtractionService::withLocalFile()` تحلّ الملف إلى مسار محلي: إن كان
 القرص محليًا استخدم `path()` مباشرةً، وإن كان بعيدًا (Supabase/S3) نزّله إلى ملف مؤقت ثم
