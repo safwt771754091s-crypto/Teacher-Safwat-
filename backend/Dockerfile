@@ -1,11 +1,17 @@
 # Production image for the Yemeni Smart Teacher API (Laravel 13 / PHP 8.4).
 FROM php:8.4-cli
 
-# System deps + PHP extensions used by the app (PDF parsing, mbstring, intl, gd, db).
+# System deps + PHP extensions used by the app (PDF parsing, OCR, mbstring, intl, gd, db).
 # pdo_pgsql is the production driver: the database is Supabase PostgreSQL.
+# poppler-utils/ghostscript/tesseract are required at runtime to render textbook
+# pages and OCR scanned books, so they are installed in the image (not dev-only).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git unzip libzip-dev libicu-dev libpng-dev libonig-dev \
-        postgresql-client \
+        git unzip pkg-config \
+        libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libonig-dev \
+        libpq-dev libsqlite3-dev libxml2-dev \
+        postgresql-client poppler-utils ghostscript \
+        tesseract-ocr tesseract-ocr-ara \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" pdo_pgsql pdo_sqlite mbstring bcmath gd intl zip xml \
     && rm -rf /var/lib/apt/lists/*
 
