@@ -113,4 +113,30 @@ class ProductionSecurityTest extends TestCase
         // The migrated test database has the full schema, so the smoke test passes.
         $this->artisan('platform:db-status')->assertExitCode(0);
     }
+
+    public function test_public_config_exposes_supabase_publishable_key(): void
+    {
+        config([
+            'services.supabase.url' => 'https://example.supabase.co',
+            'services.supabase.publishable_key' => 'sb_publishable_test',
+        ]);
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('supabase.url', 'https://example.supabase.co')
+            ->assertJsonPath('supabase.publishable_key', 'sb_publishable_test');
+    }
+
+    public function test_public_config_never_exposes_service_role_secret(): void
+    {
+        // The service-role key must never be handed to the browser. It lives in
+        // a different env var that the config endpoint does not read.
+        putenv('SUPABASE_SERVICE_ROLE_KEY=super-secret-service-role');
+
+        $body = $this->getJson('/api/v1/config')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('super-secret-service-role', $body);
+
+        putenv('SUPABASE_SERVICE_ROLE_KEY');
+    }
 }
