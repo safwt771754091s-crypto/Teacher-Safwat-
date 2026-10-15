@@ -3,6 +3,28 @@ set -e
 
 cd /app
 
+# Database target -----------------------------------------------------------
+# A managed database is selected with DB_URL (a full connection string such as
+# a Supabase session-pooler URL); the discrete DB_HOST/DB_USERNAME/... vars are
+# the alternative. When DB_CONNECTION names a server driver but no real target
+# is set, the default host (127.0.0.1) points inside this container and every
+# query fails - so fall back to SQLite and say so loudly instead of crash-looping.
+is_local_host() {
+    case "${1:-}" in
+        ""|127.0.0.1|localhost|::1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if [ "${DB_CONNECTION:-sqlite}" != "sqlite" ]; then
+    if [ -z "${DB_URL:-}" ] && is_local_host "${DB_HOST:-}"; then
+        echo "WARNING: DB_CONNECTION=${DB_CONNECTION} but no DB_URL/DB_HOST is set; using SQLite." >&2
+        echo "         Set DB_URL (e.g. the Supabase session-pooler string) for a persistent database." >&2
+        export DB_CONNECTION=sqlite
+        export DB_DATABASE=/app/database/database.sqlite
+    fi
+fi
+
 # SQLite fallback: create the database file on first boot (local/no-services).
 if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then
     touch "${DB_DATABASE:-/app/database/database.sqlite}"
@@ -18,8 +40,15 @@ php artisan config:clear >/dev/null 2>&1 || true
 
 # Migrate + seed. Seeding is idempotent and, in production, skips the demo
 # accounts (see UsersAndGamesSeeder) so no default password is ever created.
-php artisan migrate --force
-php artisan db:seed --force
+#
+# A configured-but-unreachable database is a real misconfiguration (e.g. a wrong
+# DB_URL). Report it and keep serving so the health check and operator tooling
+# stay reachable, instead of entering a crash loop.
+if ! php artisan migrate --force; then
+    echo "ERROR: migrate failed - check DB_URL / DB_* settings. Starting without migrations." >&2
+else
+    php artisan db:seed --force || echo "WARNING: seeding failed; continuing." >&2
+fi
 
 # Create the owner from environment secrets when provided. This is how the
 # first production owner is created without shipping credentials in the image.

@@ -8,6 +8,8 @@
 # Required secrets (set in the Render dashboard, never committed):
 #   DB_URL        Supabase "Session pooler" connection string
 #                 postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#                 Without it the service falls back to SQLite (data lost on each
+#                 restart, since Render's filesystem is ephemeral) and logs a warning.
 #   APP_KEY       php artisan key:generate --show
 #   OWNER_EMAIL   first owner email
 #   OWNER_PASSWORD first owner password (min 10 chars)
