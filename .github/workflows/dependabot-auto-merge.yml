@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Find the Dependabot pull request
         id: pr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const head = context.payload.workflow_run.head_branch;
