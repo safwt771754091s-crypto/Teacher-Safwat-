@@ -40,6 +40,25 @@ class TeacherController extends Controller
         return response()->json(['textbook' => $textbook], 201);
     }
 
+    /**
+     * Edit a textbook's catalogue metadata (title/term/edition/publisher/branch/
+     * authority). Needed so a book's branch can be corrected after import.
+     */
+    public function updateTextbook(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'title' => ['sometimes', 'required', 'string', 'max:200'],
+            'term' => ['sometimes', 'required', 'in:first,second'],
+            'edition' => ['nullable', 'string', 'max:60'],
+            'publisher' => ['nullable', 'string', 'max:120'],
+            'authority' => ['sometimes', 'required', 'in:common,sanaa,aden'],
+            'branch' => ['sometimes', 'required', 'in:general,scientific,literary'],
+        ]);
+
+        $textbook->update($data);
+        return response()->json(['textbook' => $textbook]);
+    }
+
     public function uploadPdf(Request $request, Textbook $textbook)
     {
         $request->validate(['file' => ['required', 'file', 'mimes:pdf', 'max:51200']]);
