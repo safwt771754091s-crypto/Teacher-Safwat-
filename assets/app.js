@@ -921,6 +921,7 @@
             <div class="ex-actions">
                 <button class="btn small" data-bact="upload-pdf" data-id="${t.id}">📤 رفع PDF</button>
                 <button class="btn small" data-bact="upload-page" data-id="${t.id}">🖼️ رفع صفحة</button>
+                <button class="btn small ghost" data-bact="edit" data-id="${t.id}" data-title="${esc(t.title)}" data-term="${esc(t.term)}" data-authority="${esc(t.authority || 'common')}" data-branch="${esc(t.branch || 'general')}">✏️ تعديل البيانات</button>
                 <button class="btn small" data-bact="pages" data-id="${t.id}">📄 مراجعة الصفحات</button>
                 <button class="btn small" data-bact="draft-lessons" data-id="${t.id}">✂️ توليد مسودات الدروس</button>
                 <button class="btn small" data-bact="publish" data-id="${t.id}">✅ نشر</button>
@@ -957,6 +958,8 @@
             inp.click();
         } else if (act === 'upload-page') {
             openPageUpload(id, card);
+        } else if (act === 'edit') {
+            openBookEdit(card);
         } else if (act === 'pages') {
             openPagesReview(id, card);
         } else if (act === 'draft-lessons') {
@@ -968,6 +971,44 @@
         } else if (act === 'lessons') {
             openLessonAdmin(id, card);
         }
+    }
+
+    function openBookEdit(card) {
+        const d = card.dataset;
+        el('modalBody').innerHTML = `<h3>تعديل بيانات الكتاب</h3>
+            <label>العنوان<input id="beTitle" value="${esc(d.title || '')}"></label>
+            <label>الفصل الدراسي<select id="beTerm">
+                <option value="first" ${d.term === 'first' ? 'selected' : ''}>الفصل الأول</option>
+                <option value="second" ${d.term === 'second' ? 'selected' : ''}>الفصل الثاني</option>
+            </select></label>
+            <label>الفرع<select id="beBranch">
+                <option value="general" ${d.branch === 'general' ? 'selected' : ''}>عام</option>
+                <option value="scientific" ${d.branch === 'scientific' ? 'selected' : ''}>علمي</option>
+                <option value="literary" ${d.branch === 'literary' ? 'selected' : ''}>أدبي</option>
+            </select></label>
+            <label>الجهة / المنهج<select id="beAuthority">
+                <option value="common" ${d.authority === 'common' ? 'selected' : ''}>مشترك</option>
+                <option value="sanaa" ${d.authority === 'sanaa' ? 'selected' : ''}>صنعاء</option>
+                <option value="aden" ${d.authority === 'aden' ? 'selected' : ''}>عدن</option>
+            </select></label>
+            <button class="btn primary" id="beSave">حفظ التعديلات</button>`;
+        el('modal').classList.remove('hidden');
+        el('beSave').onclick = async () => {
+            const title = el('beTitle').value.trim();
+            if (!title) { toast('أدخل عنوان الكتاب', 'error'); return; }
+            busy(true);
+            try {
+                await API.patch(`/textbooks/${d.book}`, {
+                    title,
+                    term: el('beTerm').value,
+                    branch: el('beBranch').value,
+                    authority: el('beAuthority').value,
+                });
+                toast('تم حفظ بيانات الكتاب');
+                el('modal').classList.add('hidden');
+                loadContentBooks();
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
     }
 
     function openPageUpload(bookId, card) {
@@ -1024,6 +1065,8 @@
         out.innerHTML = `<div class="lesson-admin">
             <div class="ask-row"><input id="nlTitle" placeholder="عنوان درس جديد"><button class="btn small primary" id="nlAdd">إضافة درس</button></div>
             <ul class="lesson-list">${d.lessons.map((l) => `<li class="lesson-item"><span class="lesson-title">${esc(l.title)}</span>
+                <button class="btn small ghost" data-addsec="${l.id}">➕ قسم</button>
+                <button class="btn small ghost" data-addex="${l.id}">➕ تمرين</button>
                 <button class="btn small ghost" data-sum="${l.id}">توليد ملخص</button>
                 <button class="btn small ghost" data-suggest="${l.id}">🤖 اقترح حلولًا</button></li>`).join('')}</ul>
             <div class="summaries-out"></div>
@@ -1034,6 +1077,8 @@
             try { await API.post(`/textbooks/${bookId}/lessons`, { title: el('nlTitle').value }); toast('تمت الإضافة'); openLessonAdmin(bookId, card); }
             catch (e) { toast(e.message, 'error'); } finally { busy(false); }
         };
+        out.querySelectorAll('[data-addsec]').forEach((b) => { b.onclick = () => openSectionForm(b.dataset.addsec, card); });
+        out.querySelectorAll('[data-addex]').forEach((b) => { b.onclick = () => openExerciseForm(b.dataset.addex, card); });
         const suggestionsOut = out.querySelector('.suggestions-out');
         out.querySelectorAll('[data-suggest]').forEach((b) => {
             b.onclick = async () => {
@@ -1084,6 +1129,90 @@
             };
         });
         busy(false);
+    }
+
+    // ---------------- Manual lesson authoring (sections & exercises) ----------------
+    const SECTION_TYPES = [['heading', 'عنوان'], ['point', 'نقطة'], ['definition', 'تعريف'], ['example', 'مثال'], ['note', 'ملاحظة'], ['vocab', 'مفردات']];
+
+    function openSectionForm(lessonId, card) {
+        el('modalBody').innerHTML = `<h3>إضافة قسم للدرس</h3>
+            <label>النوع<select id="secType">${SECTION_TYPES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>
+            <label>العنوان (اختياري)<input id="secTitle"></label>
+            <label>المحتوى<textarea id="secContent" rows="4"></textarea></label>
+            <label>رقم الصفحة في الكتاب (اختياري)<input id="secPage" type="number" min="1"></label>
+            <button class="btn primary" id="secSave">حفظ القسم</button>`;
+        el('modal').classList.remove('hidden');
+        el('secSave').onclick = async () => {
+            const content = el('secContent').value.trim();
+            if (!content) { toast('أدخل محتوى القسم', 'error'); return; }
+            busy(true);
+            try {
+                await API.post(`/lessons/${lessonId}/sections`, {
+                    type: el('secType').value,
+                    title: el('secTitle').value.trim() || null,
+                    content,
+                    source_page: el('secPage').value ? Number(el('secPage').value) : null,
+                });
+                toast('تمت إضافة القسم');
+                el('modal').classList.add('hidden');
+                openLessonAdmin(card.dataset.book, card);
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
+    }
+
+    function openExerciseForm(lessonId, card) {
+        el('modalBody').innerHTML = `<h3>إضافة تمرين للدرس</h3>
+            <label>النوع<select id="exType">
+                <option value="mcq">اختيار من متعدد</option>
+                <option value="true_false">صح / خطأ</option>
+                <option value="short_answer">إجابة قصيرة</option>
+                <option value="numeric">رقمي</option>
+                <option value="step_by_step">خطوة بخطوة</option>
+                <option value="ordering">ترتيب</option>
+            </select></label>
+            <label>نص السؤال<textarea id="exQuestion" rows="3"></textarea></label>
+            <div id="exOptionsWrap" class="hidden">
+                <label>الخيارات (خيار في كل سطر، والخيار الصحيح يبدأ بـ *)<textarea id="exOptions" rows="4"></textarea></label>
+            </div>
+            <label>الإجابة المرجعية<input id="exAnswer"></label>
+            <label>تلميح (اختياري)<input id="exHint"></label>
+            <label>رقم الصفحة (اختياري)<input id="exPage" type="number" min="1"></label>
+            <label>المستوى<select id="exDiff"><option value="easy">سهل</option><option value="medium">متوسط</option><option value="hard">صعب</option></select></label>
+            <button class="btn primary" id="exSave">حفظ التمرين</button>`;
+        el('modal').classList.remove('hidden');
+        const optsWrap = el('exOptionsWrap');
+        const toggleOpts = () => optsWrap.classList.toggle('hidden', !['mcq', 'true_false'].includes(el('exType').value));
+        el('exType').onchange = toggleOpts;
+        toggleOpts();
+        el('exSave').onclick = async () => {
+            const question = el('exQuestion').value.trim();
+            if (!question) { toast('أدخل نص السؤال', 'error'); return; }
+            const type = el('exType').value;
+            const payload = {
+                type,
+                question,
+                answer: el('exAnswer').value.trim() || null,
+                hint: el('exHint').value.trim() || null,
+                source_page: el('exPage').value ? Number(el('exPage').value) : null,
+                difficulty: el('exDiff').value,
+            };
+            if (['mcq', 'true_false'].includes(type)) {
+                const options = el('exOptions').value.split('\n').map((s) => s.trim()).filter(Boolean).map((s) => {
+                    const correct = s.charAt(0) === '*';
+                    return { text: correct ? s.slice(1).trim() : s, is_correct: correct };
+                });
+                if (options.length < 2) { toast('أدخل خيارين على الأقل', 'error'); return; }
+                if (!options.some((o) => o.is_correct)) { toast('حدّد الخيار الصحيح بعلامة *', 'error'); return; }
+                payload.options = options;
+            }
+            busy(true);
+            try {
+                await API.post(`/lessons/${lessonId}/exercises`, payload);
+                toast('تمت إضافة التمرين');
+                el('modal').classList.add('hidden');
+                openLessonAdmin(card.dataset.book, card);
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
     }
 
     // ---------------- AI agents dashboard ----------------
