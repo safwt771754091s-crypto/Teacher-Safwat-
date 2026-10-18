@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\DatabaseSnapshotService;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Group;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -205,5 +206,76 @@ class DatabaseSnapshotTest extends TestCase
     private function realListener(): SnapshotBeforeDestructiveCommand
     {
         return new SnapshotBeforeDestructiveCommand(app(DatabaseSnapshotService::class));
+    }
+
+    // --- remote (external) storage -------------------------------------------
+
+    public function test_uploads_are_disabled_by_default(): void
+    {
+        $this->assertFalse(app(DatabaseSnapshotService::class)->uploadsEnabled());
+        $this->assertNull(app(DatabaseSnapshotService::class)->remoteTarget());
+    }
+
+    public function test_create_and_upload_stores_the_snapshot_remotely(): void
+    {
+        Storage::fake('snapshots-remote');
+        config([
+            'platform.db_snapshots.remote.enabled' => true,
+            'platform.db_snapshots.remote.disk' => 'snapshots-remote',
+            'platform.db_snapshots.remote.path' => 'db-snapshots',
+        ]);
+        $service = app(DatabaseSnapshotService::class);
+
+        $meta = $service->createAndUpload(label: 'offsite');
+
+        $this->assertSame('snapshots-remote:db-snapshots/' . $meta['name'], $meta['remote']);
+        Storage::disk('snapshots-remote')->assertExists('db-snapshots/' . $meta['name']);
+        Storage::disk('snapshots-remote')->assertExists('db-snapshots/' . $meta['name'] . '.json');
+
+        $remote = $service->listRemote();
+        $this->assertCount(1, $remote);
+        $this->assertSame($meta['name'], $remote[0]['name']);
+        $this->assertSame('offsite', $remote[0]['label']);
+    }
+
+    public function test_a_remote_snapshot_can_be_pulled_back_and_restored(): void
+    {
+        Storage::fake('snapshots-remote');
+        config([
+            'platform.db_snapshots.remote.enabled' => true,
+            'platform.db_snapshots.remote.disk' => 'snapshots-remote',
+        ]);
+        $service = app(DatabaseSnapshotService::class);
+
+        $meta = $service->createAndUpload();
+        $users = User::count();
+        $this->assertGreaterThan(0, $users);
+
+        // Simulate a wipe: remove the local dump, then pull it back from remote.
+        @unlink($service->path($meta['name']));
+        @unlink($service->path($meta['name']) . '.json');
+        $this->assertNull($service->path($meta['name']));
+
+        $path = $service->localPath($meta['name']);
+        $this->assertNotNull($path);
+        $this->assertFileExists($path);
+
+        User::query()->delete();
+        $this->assertSame(0, User::count());
+        $service->restore($path);
+        $this->assertSame($users, User::count());
+    }
+
+    public function test_upload_endpoint_is_owner_only_and_reports_disabled_remote(): void
+    {
+        $student = User::where('email', 'student@school.ye')->firstOrFail();
+        $this->actingAs($student)
+            ->postJson('/api/v1/owner/db-snapshots/upload', ['name' => 'x.sql.gz'])
+            ->assertForbidden();
+
+        // Remote storage is off in tests, so the owner gets a clear 422.
+        $this->actingAs($this->owner())
+            ->postJson('/api/v1/owner/db-snapshots/upload', ['name' => 'x.sql.gz'])
+            ->assertStatus(422);
     }
 }

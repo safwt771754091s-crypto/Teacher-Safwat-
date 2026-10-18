@@ -21,13 +21,15 @@ use Throwable;
 class DatabaseSnapshotCommand extends Command
 {
     protected $signature = 'platform:db-snapshot
-        {action=create : create | list | restore}
-        {--name= : snapshot file name (for restore)}
+        {action=create : create | list | restore | upload | remote-list}
+        {--name= : snapshot file name (for restore/upload)}
         {--label= : optional comment stored with the snapshot}
         {--keep=0 : after create, prune so only the newest N remain (0 = keep all)}
+        {--upload : after create, also upload the snapshot to the remote disk}
+        {--remote : for restore, download the snapshot from the remote disk if missing}
         {--json : emit machine-readable JSON}';
 
-    protected $description = 'Create, list, or restore portable database snapshots.';
+    protected $description = 'Create, list, upload, or restore portable database snapshots.';
 
     public function handle(DatabaseSnapshotService $snapshots): int
     {
@@ -38,6 +40,8 @@ class DatabaseSnapshotCommand extends Command
                 'create' => $this->create($snapshots),
                 'list' => $this->list($snapshots),
                 'restore' => $this->restore($snapshots),
+                'upload' => $this->upload($snapshots),
+                'remote-list' => $this->remoteList($snapshots),
                 default => $this->invalid($action),
             };
         } catch (Throwable $e) {
@@ -49,7 +53,9 @@ class DatabaseSnapshotCommand extends Command
 
     private function create(DatabaseSnapshotService $snapshots): int
     {
-        $meta = $snapshots->create(label: $this->option('label') ?: null);
+        $meta = $this->option('upload')
+            ? $snapshots->createAndUpload(label: $this->option('label') ?: null)
+            : $snapshots->create(label: $this->option('label') ?: null);
         $removed = [];
         if ((int) $this->option('keep') > 0) {
             $removed = $snapshots->prune((int) $this->option('keep'));
@@ -68,9 +74,73 @@ class DatabaseSnapshotCommand extends Command
         $this->line('الجداول: ' . $meta['tables'] . ' — الصفوف: ' . $meta['rows']);
         $this->line('الحجم: ' . $this->human((int) $meta['bytes']));
         $this->line('sha256: ' . $meta['sha256']);
+        if (! empty($meta['remote'])) {
+            $this->line('التخزين البعيد: ' . $meta['remote']);
+        }
         if ($removed) {
             $this->warn('حُذفت لقطات قديمة: ' . implode(', ', $removed));
         }
+
+        return self::SUCCESS;
+    }
+
+    private function upload(DatabaseSnapshotService $snapshots): int
+    {
+        if (! $snapshots->uploadsEnabled()) {
+            $this->error('التخزين البعيد غير مُفعّل (اضبط DB_SNAPSHOT_REMOTE=1).');
+
+            return self::FAILURE;
+        }
+
+        $name = (string) $this->option('name');
+        if ($name === '') {
+            $latest = $snapshots->list()[0]['name'] ?? null;
+            if (! $latest) {
+                $this->error('لا توجد لقطة محلية لرفعها.');
+
+                return self::FAILURE;
+            }
+            $name = $latest;
+        }
+
+        $target = $snapshots->upload($name);
+        if ($this->option('json')) {
+            $this->line(json_encode(['uploaded' => $name, 'remote' => $target], JSON_UNESCAPED_UNICODE));
+        } else {
+            $this->info('تم رفع اللقطة إلى: ' . $target);
+        }
+
+        return self::SUCCESS;
+    }
+
+    private function remoteList(DatabaseSnapshotService $snapshots): int
+    {
+        if (! $snapshots->uploadsEnabled()) {
+            $this->error('التخزين البعيد غير مُفعّل (اضبط DB_SNAPSHOT_REMOTE=1).');
+
+            return self::FAILURE;
+        }
+
+        $items = $snapshots->listRemote();
+        if ($this->option('json')) {
+            $this->line(json_encode(['snapshots' => $items, 'target' => $snapshots->remoteTarget()], JSON_UNESCAPED_UNICODE));
+
+            return self::SUCCESS;
+        }
+
+        if (! $items) {
+            $this->warn('لا توجد لقطات على التخزين البعيد.');
+
+            return self::SUCCESS;
+        }
+
+        $this->table(
+            ['الملف', 'التاريخ', 'الجداول', 'الصفوف', 'الحجم'],
+            array_map(fn ($s) => [
+                $s['name'], $s['created_at'],
+                $s['tables'] ?? '-', $s['rows'] ?? '-', $this->human((int) $s['bytes']),
+            ], $items)
+        );
 
         return self::SUCCESS;
     }
@@ -105,7 +175,9 @@ class DatabaseSnapshotCommand extends Command
     private function restore(DatabaseSnapshotService $snapshots): int
     {
         $name = (string) $this->option('name');
-        $path = $snapshots->path($name);
+        $path = $this->option('remote')
+            ? $snapshots->localPath($name)
+            : $snapshots->path($name);
         if (! $path) {
             $this->error('لم يُعثر على اللقطة: ' . $name);
 

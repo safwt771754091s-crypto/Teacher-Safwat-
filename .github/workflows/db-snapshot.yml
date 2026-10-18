@@ -76,6 +76,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Optional durable copy: when the Supabase/S3 secrets are configured the
+      # snapshot is also mirrored to remote storage, so it survives even after
+      # the 30-day artifact expires. Silently skipped when the secrets are unset.
+      - name: Mirror the snapshot to remote storage (optional)
+        env:
+          DB_SNAPSHOT_REMOTE: '1'
+          DB_SNAPSHOT_REMOTE_DISK: supabase
+          DB_SNAPSHOT_REMOTE_PATH: db-snapshots
+          SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+          SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+          SUPABASE_S3_BUCKET: ${{ secrets.SUPABASE_S3_BUCKET }}
+          SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
+        run: |
+          if [ -z "$SUPABASE_S3_ACCESS_KEY_ID" ]; then
+            echo "Remote storage secrets not set; skipping mirror."
+            exit 0
+          fi
+          php artisan platform:db-snapshot upload --name="$SNAPSHOT_NAME" --json
+
       - name: Tag the snapshotted commit
         run: |
           git config user.name "openhands"

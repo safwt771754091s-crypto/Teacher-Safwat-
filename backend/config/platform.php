@@ -138,5 +138,14 @@ return [
         // only the newest few "auto pre-*" snapshots so backups cannot pile up.
         'before_destructive' => (bool) env('DB_SNAPSHOT_BEFORE', true),
         'pre_command_keep' => (int) env('DB_SNAPSHOT_PRE_KEEP', 5),
+        // Mirror every snapshot to a remote disk (Supabase Storage by default)
+        // so a backup survives a local wipe. Enabled by setting
+        // DB_SNAPSHOT_REMOTE=1 (and providing the disk's credentials).
+        'remote' => [
+            'enabled' => (bool) env('DB_SNAPSHOT_REMOTE', false),
+            'disk' => env('DB_SNAPSHOT_REMOTE_DISK', 'supabase'),
+            'path' => env('DB_SNAPSHOT_REMOTE_PATH', 'db-snapshots'),
+            'keep' => (int) env('DB_SNAPSHOT_REMOTE_KEEP', 0),
+        ],
     ],
 ];
