@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\GameController;
 use App\Http\Controllers\Api\OwnerController;
 use App\Http\Controllers\Api\ParentController;
 use App\Http\Controllers\Api\ProgressController;
+use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\TeacherController;
 use Illuminate\Support\Facades\Route;
 
@@ -52,6 +53,9 @@ Route::prefix('v1')->group(function () {
     Route::get('lessons/{lesson}', [CurriculumController::class, 'lesson']);
     Route::get('lessons/{lesson}/pages/{page}', [CurriculumController::class, 'pageSource']);
     Route::get('lessons/{lesson}/pages/{page}/image', [CurriculumController::class, 'pageImage']);
+    // Curriculum self-test bank (multiple choice, with source evidence). Public
+    // like the rest of the catalogue so it can power a standalone quiz page.
+    Route::get('quiz', [QuizController::class, 'index']);
     // Server-side Arabic TTS (used when the device has no Arabic voice).
     // Throttled because each call hits a paid upstream synthesis service.
     Route::get('tts', [AudioController::class, 'speech'])->middleware('throttle:120,1');
