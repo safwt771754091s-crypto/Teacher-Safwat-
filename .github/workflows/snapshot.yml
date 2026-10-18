@@ -1,0 +1,80 @@
+name: Snapshot main
+
+# Creates an annotated git tag (snapshot-<UTC date>-<short sha>) on every change
+# that lands on main, so any revision can be restored later:
+#
+#   git fetch --tags
+#   git log --oneline --decorate            # list snapshots
+#   git show snapshot-<date>-<sha>          # read the dated comment
+#   git checkout snapshot-<date>-<sha>      # go back to that point (detached HEAD)
+#   git switch -c restore/<date> <snapshot> # ...or restore onto a branch
+#
+# The tags are pushed back to origin, so they survive even if this runner or the
+# workspace is wiped. Run it manually (Actions -> Snapshot main -> Run workflow)
+# to add an extra snapshot with a custom comment at any time.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      comment:
+        description: 'Extra comment for this snapshot'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snapshot-main
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Tag the current main revision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create the snapshot tag
+        env:
+          COMMENT: ${{ github.event.inputs.comment }}
+        run: |
+          set -eu
+          git config user.name "snapshot-bot"
+          git config user.email "snapshot-bot@users.noreply.github.com"
+
+          sha="$(git rev-parse HEAD)"
+          short="$(git rev-parse --short HEAD)"
+          ts="$(date -u +%Y-%m-%d-%H%M%S)"
+          tag="snapshot-${ts}-${short}"
+
+          subject="$(git log -1 --pretty=%s)"
+          author="$(git log -1 --pretty='%an <%ae>')"
+          body="$(git log -1 --pretty=%b | head -c 1000)"
+
+          {
+            echo "Snapshot taken $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "commit:  ${sha}"
+            echo "branch:  ${GITHUB_REF_NAME}"
+            echo "subject: ${subject}"
+            echo "author:  ${author}"
+            if [ -n "${COMMENT}" ]; then
+              echo
+              echo "comment: ${COMMENT}"
+            fi
+            if [ -n "${body}" ]; then
+              echo
+              echo "--- commit message ---"
+              echo "${body}"
+            fi
+            echo
+            echo "Restore with: git checkout ${tag}"
+          } > /tmp/msg.txt
+
+          git tag -a "${tag}" -F /tmp/msg.txt
+          git push origin "${tag}"
+          echo "created ${tag}"

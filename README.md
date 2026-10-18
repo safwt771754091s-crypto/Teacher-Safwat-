@@ -334,6 +334,21 @@ php artisan platform:db-status
 > الخدمة بعد فترة خمول وتستيقظ عند أول طلب. للتحقق من الاتصال: `php artisan platform:db-status`.
 
 
+### 4) النسخ الاحتياطية (Snapshots) والرجوع لأي تغيير
+
+كل تغيير يُدمج في `main` يُنشئ **وسمًا (tag) موثّقًا** باسم `snapshot-<التاريخ UTC>-<أول 7 أحرف من الالتزام>`
+يحمل تعليقًا بالتاريخ والالتزام. الوسوم تُدفع إلى `origin` فتبقى حتى لو حُذفت بيئة العمل.
+
+- **تلقائيًا:** سير العمل `.github/workflows/snapshot.yml` ينشئ وسمًا عند كل دفع إلى `main`.
+- **يدويًا الآن:** `bash scripts/snapshot.sh "سبب اللقطة"`.
+- **عرض اللقطات:** `bash scripts/snapshot.sh list` ثم `bash scripts/snapshot.sh show <tag>`.
+- **الرجوع:** `bash scripts/snapshot.sh restore <tag>` (ينشئ فرعًا `restore/<tag>` للمراجعة)،
+  أو مباشرة `git checkout <tag>`.
+
+> مثال: `snapshot-2026-10-18-054452-05bcbc4` — لقطة أولى بعد تشغيل الـ API الدائم على Render
+> وإعادة نشر الواجهة على GitHub Pages.
+
+
 ---
 
 ## English summary
