@@ -6,15 +6,19 @@
     <title>معلمي الذكي اليمني — معلم منزلي رقمي للمنهج اليمني</title>
     <meta name="description" content="منصة تعليمية يمنية: شرح الدروس من الكتاب المدرسي، تلخيص، صوت، حل التمارين خطوة بخطوة، وألعاب تعليمية للابتدائي.">
     <meta name="theme-color" content="#2f6a43">
+    <!-- iOS: standalone web-app + home-screen icon (180x180, opaque). -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="معلمي الذكي">
     <!-- Public API origin. Set this to the deployed Laravel host when the site
          is served from a fixed origin; config.js also resolves it at runtime. -->
     <meta name="api-base" content="">
     <link rel="manifest" href="manifest.webmanifest">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
-    <!-- BUILD is bumped on every deploy. It also versions the shell asset URLs
-         so a device stuck on an older cache-first service worker fetches the
-         new files (a new URL is never in its cache) instead of serving stale JS. -->
-    <link rel="stylesheet" href="assets/styles.css?v=6">
+    <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon-180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png">
+    <!-- BUILD is bumped on every deploy so devices fetch the new shell assets. -->
+    <link rel="stylesheet" href="assets/styles.css?v=7">
 </head>
 <body>
     <div id="app" class="app">
@@ -28,7 +32,6 @@
                 </div>
             </div>
             <div class="topbar-actions">
-                <span id="netChip" class="chip offline-chip hidden">بدون إنترنت</span>
                 <span id="userChip" class="chip hidden"></span>
                 <button id="logoutBtn" class="icon-btn hidden" aria-label="خروج">⏏</button>
             </div>
@@ -62,8 +65,6 @@
 
     <script src="assets/config.js?v=8"></script>
     <script src="assets/api.js?v=6"></script>
-    <script src="assets/offline.js?v=6"></script>
-    <script src="assets/app.js?v=8"></script>
-    <script>window.Offline && window.Offline.registerServiceWorker();</script>
+    <script src="assets/app.js?v=9"></script>
 </body>
 </html>
