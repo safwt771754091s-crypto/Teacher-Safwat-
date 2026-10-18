@@ -1,0 +1,97 @@
+name: Database snapshot
+
+# Saves a restorable copy of the platform database on every change to main,
+# so a bad migration or seed can be rolled back. The dump is produced by
+# `php artisan platform:db-snapshot` (the same command that runs locally and in
+# the owner dashboard), then kept two ways:
+#   - a GitHub Release named db-snapshot-<timestamp> (survives workflow-run
+#     cleanup; download the .sql.gz asset to restore),
+#   - a build artifact on the run (30-day retention).
+# It also creates an annotated git tag pointing at the snapshotted commit.
+#
+# The CI database is migrated and seeded here, so the snapshot is a faithful,
+# restorable copy of the curriculum/accounts the platform ships with. For a
+# live production database, run `php artisan platform:db-snapshot` against it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'Optional comment for this snapshot'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Dump + publish the database
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, pdo_pgsql, mbstring, bcmath, gd, intl, zip, xml
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare the database
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          mkdir -p database
+          : > database/database.sqlite
+          php artisan migrate --seed --force
+
+      - name: Create the snapshot
+        run: |
+          php artisan platform:db-snapshot create \
+            --label="${{ github.event.inputs.label || github.ref_name }} @ ${{ github.sha }}" \
+            --json | tee /tmp/snapshot.json
+          NAME=$(php -r '$d=json_decode(file_get_contents("/tmp/snapshot.json"),true); echo $d["snapshot"]["name"];')
+          echo "SNAPSHOT_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "SNAPSHOT_STAMP=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+
+      - name: Upload the snapshot as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-snapshot-${{ env.SNAPSHOT_STAMP }}-${{ github.sha }}
+          path: |
+            backend/storage/app/db-snapshots/*.sql.gz
+            backend/storage/app/db-snapshots/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Tag the snapshotted commit
+        run: |
+          git config user.name "openhands"
+          git config user.email "openhands@all-hands.dev"
+          git tag -a "db-snapshot-${{ env.SNAPSHOT_STAMP }}" -m "DB snapshot ${{ env.SNAPSHOT_STAMP }} (${{ env.SNAPSHOT_NAME }}) for ${{ github.sha }}"
+          git push origin "db-snapshot-${{ env.SNAPSHOT_STAMP }}"
+
+      - name: Publish the snapshot as a GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES="لقطة قاعدة بيانات تلقائية عند تغيير main.
+          commit: ${{ github.sha }}
+          للاستعادة: php artisan platform:db-snapshot restore --name=${{ env.SNAPSHOT_NAME }}"
+          gh release create "db-snapshot-${{ env.SNAPSHOT_STAMP }}" \
+            storage/app/db-snapshots/*.sql.gz \
+            storage/app/db-snapshots/*.json \
+            --title "لقطة قاعدة البيانات ${{ env.SNAPSHOT_STAMP }}" \
+            --notes "$NOTES"

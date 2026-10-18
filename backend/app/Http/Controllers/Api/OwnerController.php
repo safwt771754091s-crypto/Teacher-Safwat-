@@ -8,7 +8,9 @@ use App\Models\Lesson;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
+use App\Services\DatabaseSnapshotService;
 use Illuminate\Http\Request;
+use Throwable;
 
 class OwnerController extends Controller
 {
@@ -119,5 +121,58 @@ class OwnerController extends Controller
     public function errors()
     {
         return response()->json(['logs' => AiUsageLog::where('success', false)->latest()->take(50)->get()]);
+    }
+
+    // ---------------- Database snapshots ----------------
+
+    public function dbSnapshots(DatabaseSnapshotService $snapshots)
+    {
+        return response()->json([
+            'snapshots' => $snapshots->list(),
+            'driver' => $snapshots->driver(),
+            'directory' => $snapshots->directory(),
+        ]);
+    }
+
+    public function createDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
+    {
+        $data = $request->validate(['label' => ['nullable', 'string', 'max:200']]);
+
+        try {
+            $meta = $snapshots->create(label: $data['label'] ?? null);
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['snapshot' => $meta], 201);
+    }
+
+    public function restoreDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
+
+        $path = $snapshots->path($data['name']);
+        if (! $path) {
+            return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
+        }
+
+        try {
+            $snapshots->restore($path);
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'تعذّرت الاستعادة: ' . $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'تمت استعادة اللقطة.', 'name' => $data['name']]);
+    }
+
+    public function downloadDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
+        $path = $snapshots->path($data['name']);
+        if (! $path) {
+            return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
+        }
+
+        return response()->download($path, basename($path), ['Content-Type' => 'application/gzip']);
     }
 }

@@ -220,6 +220,7 @@ API_PUBLIC_URL=https://api.example.ye bash scripts/run_demo.sh
 | POST | `/textbooks`، `/textbooks/{id}/upload-pdf`، `/upload-page`، `/draft-lessons`، `/publish`، `/lessons/{id}/generate-summary`، `/summaries/{id}/approve`، `/exercises/{id}/verify` | إدارة المحتوى | معلم/مالك |
 | GET | `/agents`، `/agents/targets`، `/agents/runs`، POST `/agents/{key}/run` | وكلاء الذكاء الاصطناعي (شرح/حل/سرد متاح للطالب، والاستيراد والمنهج والمراجعة للمعلم+ ) | طالب+ |
 | GET | `/owner/overview`، `/owner/users`، `/owner/ai-usage`، POST `/owner/assign-role` | الإدارة | مالك |
+| GET/POST | `/owner/db-snapshots`، POST `/owner/db-snapshots/restore`، GET `/owner/db-snapshots/download` | لقطات قاعدة البيانات (إنشاء/عرض/تنزيل/استعادة) | مالك |
 
 ## الاختبارات
 
@@ -230,7 +231,7 @@ cd backend && php artisan test
 تغطي الاختبارات: المصادقة وفرض الأدوار، المنهج ومصادر الصفحات، إسناد شرح المعلم الذكي
 (ومنع الاختراع)، تصحيح التمارين (بما فيها الأرقام العربية)، الألعاب والنقاط، لوحة ولي
 الأمر، وإدارة المحتوى، وطبقة الوكلاء (التسجيل، الجاهزية بدون إنترنت، منع الاختراع،
-وفرض صلاحيات الوكلاء).
+وفرض صلاحيات الوكلاء)، ولقطات قاعدة البيانات (الإنشاء، الاستعادة، التقليم، وأمان المسارات).
 
 ## لوحات التحكم
 
@@ -239,7 +240,8 @@ cd backend && php artisan test
 - **ولي الأمر**: وقت التعلم، الدروس المتقنة، متوسط الإتقان، الأخطاء المتكررة، وتوصيات منزلية.
 - **المعلم/المشرف**: إدارة الكتب والدروس، رفع الصفحات، توليد الملخصات واعتمادها،
   اكتشاف الدروس الصعبة.
-- **المالك/الإدارة**: المستخدمون والأدوار، نظرة عامة، وتكاليف/سجل استخدام الذكاء الاصطناعي.
+- **المالك/الإدارة**: المستخدمون والأدوار، نظرة عامة، تكاليف/سجل استخدام الذكاء الاصطناعي،
+  ولقطات قاعدة البيانات (نسخ احتياطي واستعادة).
 
 ## خطة التنفيذ
 
@@ -346,6 +348,37 @@ php artisan platform:db-status
 
 > مثال: `snapshot-2026-10-18-054452-05bcbc4` — لقطة أولى بعد تشغيل الـ API الدائم على Render
 > وإعادة نشر الواجهة على GitHub Pages.
+
+
+### 5) لقطات قاعدة البيانات (Database Snapshots)
+
+إلى جانب لقطات الكود، تُحفظ **نسخة قابلة للاستعادة من قاعدة البيانات** كملف SQL مضغوط (`.sql.gz`)
+مع ملف وصف `.json` يحمل التاريخ والمشغّل وعدد الجداول/الصفوف وبصمة `sha256`.
+
+```bash
+cd backend
+
+# إنشاء لقطة (تُحفظ في storage/app/db-snapshots افتراضيًا)
+php artisan platform:db-snapshot create --label="قبل تعديل المنهج"
+
+# عرض اللقطات / تنزيلها من لوحة المالك، أو عبر API
+php artisan platform:db-snapshot list
+
+# الاستعادة (تستبدل بيانات الجداول الموجودة)
+php artisan platform:db-snapshot restore --name=db_snapshot_2026-10-18-060000.sql.gz
+
+# إبقاء أحدث ٣٠ لقطة فقط
+php artisan platform:db-snapshot create --keep=30
+```
+
+- **تلقائيًا:** سير العمل `.github/workflows/db-snapshot.yml` ينشئ لقطة عند كل دفع إلى `main`
+  وينشرها كـ **GitHub Release** (`db-snapshot-<التاريخ>`)، ويرفعها كأثر بناء (artifact)،
+  ويضع وسمًا `db-snapshot-<التاريخ>` على الالتزام.
+- **من لوحة المالك:** بطاقة «💾 لقطات قاعدة البيانات» تتيح إنشاء لقطة وتنزيلها واستعادتها.
+- **الصلاحيات:** كل مسارات `/owner/db-snapshots` محصورة بدور `owner`.
+- **المشغّلات:** SQLite (تنفيذ في PHP بلا أدوات خارجية)، PostgreSQL (`pg_dump`/`psql`)،
+  وMySQL/MariaDB (`mysqldump`/`mysql`).
+- **ضبط المسار:** `DB_SNAPSHOT_PATH` و`DB_SNAPSHOT_KEEP` في `.env`.
 
 
 ---

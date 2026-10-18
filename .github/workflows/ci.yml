@@ -59,7 +59,13 @@ jobs:
           DB_USERNAME: school
           DB_PASSWORD: school_secret
           DB_SSLMODE: prefer
-        run: php artisan test
+        run: php artisan test --exclude-group=sqlite-snapshots
+
+      - name: Database snapshot tests (SQLite)
+        run: |
+          : > database/database.sqlite
+          DB_CONNECTION=sqlite DB_DATABASE="$PWD/database/database.sqlite" \
+            php artisan test --group=sqlite-snapshots
 
   web:
     name: Web assets (JS syntax)

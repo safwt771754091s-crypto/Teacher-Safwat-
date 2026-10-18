@@ -1097,11 +1097,85 @@
         </div>
         <div class="card"><h3>تكلفة الذكاء الاصطناعي حسب الميزة</h3>
             <ul class="points">${(ai.by_feature || []).map((f) => `<li class="pt">${esc(f.feature)}: ${f.c} طلب — التكلفة ${f.cost || 0}</li>`).join('') || '<li class="muted">لا يوجد استخدام بعد</li>'}</ul>
+        </div>
+        <div class="card">
+            <h3>💾 لقطات قاعدة البيانات</h3>
+            <p class="muted small">حفظ نسخة قابلة للاستعادة من قاعدة البيانات. تُحفظ اللقطات في الخادم، وتُنشأ لقطة تلقائية عند كل تغيير في المستودع عبر GitHub Actions.</p>
+            <div class="ask-row">
+                <input id="snapLabel" placeholder="تعليق على اللقطة (اختياري)">
+                <button class="btn primary" id="snapCreate">إنشاء لقطة</button>
+            </div>
+            <div id="snapsArea" class="muted small">جارٍ التحميل…</div>
         </div>`;
         el('uLoadBtn').onclick = loadUsers;
+        el('snapCreate').onclick = createDbSnapshot;
         await loadUsers();
+        await loadDbSnapshots();
         busy(false);
     };
+
+    async function loadDbSnapshots() {
+        const area = el('snapsArea');
+        if (!area) return;
+        try {
+            const d = await API.get('/owner/db-snapshots');
+            const snaps = d.snapshots || [];
+            if (!snaps.length) {
+                area.innerHTML = '<p class="muted">لا توجد لقطات بعد. اضغط «إنشاء لقطة» لحفظ نسخة الآن.</p>';
+                return;
+            }
+            area.innerHTML = `<table class="table"><thead><tr><th>الملف</th><th>التاريخ</th><th>الجداول/الصفوف</th><th>الحجم</th><th></th></tr></thead><tbody>` +
+                snaps.map((s) => `<tr>
+                    <td class="small">${esc(s.name)}${s.label ? `<br><span class="muted">${esc(s.label)}</span>` : ''}</td>
+                    <td class="small">${esc(String(s.created_at).replace('T', ' ').slice(0, 19))}</td>
+                    <td class="small">${s.tables == null ? '-' : s.tables} / ${s.rows == null ? '-' : s.rows}</td>
+                    <td class="small">${Math.round((s.bytes || 0) / 1024)} KB</td>
+                    <td><button class="btn small" data-download="${esc(s.name)}">تنزيل</button>
+                        <button class="btn small" data-restore="${esc(s.name)}">استعادة</button></td>
+                </tr>`).join('') + `</tbody></table>`;
+            area.querySelectorAll('[data-download]').forEach((b) => {
+                b.onclick = () => downloadDbSnapshot(b.dataset.download);
+            });
+            area.querySelectorAll('[data-restore]').forEach((b) => {
+                b.onclick = async () => {
+                    if (!window.confirm('الاستعادة ستستبدل بيانات قاعدة البيانات الحالية. متابعة؟')) return;
+                    try { const r = await API.post('/owner/db-snapshots/restore', { name: b.dataset.restore }); toast(r.message || 'تمت الاستعادة'); }
+                    catch (e) { toast(e.message, 'error'); }
+                };
+            });
+        } catch (e) { area.innerHTML = `<p class="muted">${esc(e.message || 'تعذّر تحميل اللقطات')}</p>`; }
+    }
+
+    async function createDbSnapshot() {
+        const btn = el('snapCreate');
+        const label = el('snapLabel') ? el('snapLabel').value : '';
+        btn.disabled = true;
+        try {
+            const d = await API.post('/owner/db-snapshots', { label: label || null });
+            toast('تم إنشاء لقطة: ' + d.snapshot.name);
+            if (el('snapLabel')) el('snapLabel').value = '';
+            await loadDbSnapshots();
+        } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; }
+    }
+
+    // Download a snapshot with the bearer token, then save it as a file.
+    async function downloadDbSnapshot(name) {
+        try {
+            const res = await fetch(`${API.API_BASE}/owner/db-snapshots/download?name=${encodeURIComponent(name)}`, {
+                headers: { 'Authorization': 'Bearer ' + (state.token || '') },
+            });
+            if (!res.ok) throw new Error('تعذّر تنزيل اللقطة');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) { toast(e.message, 'error'); }
+    }
 
     async function loadUsers() {
         busy(true);
