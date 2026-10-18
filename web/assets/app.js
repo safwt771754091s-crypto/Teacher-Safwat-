@@ -134,11 +134,11 @@
 
     // ---------------- Role helpers ----------------
     const ROLES = {
-        owner: { label: 'المالك / الإدارة', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
-        admin: { label: 'مشرف المحتوى', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
-        teacher: { label: 'معلم', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['profile', 'حسابي']] },
-        parent: { label: 'ولي أمر', tabs: [['home', 'متابعة أبنائي'], ['profile', 'حسابي']] },
-        student: { label: 'طالب', tabs: [['school', 'دروسي'], ['games', 'ألعابي'], ['progress', 'تقدمي'], ['profile', 'حسابي']] },
+        owner: { label: 'المالك / الإدارة', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['quiz', 'اختبر معلوماتك'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
+        admin: { label: 'مشرف المحتوى', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['quiz', 'اختبر معلوماتك'], ['owner', 'الإدارة'], ['profile', 'حسابي']] },
+        teacher: { label: 'معلم', tabs: [['home', 'لوحتي'], ['agents', '🤖 الوكلاء'], ['content', 'إدارة المحتوى'], ['quiz', 'اختبر معلوماتك'], ['profile', 'حسابي']] },
+        parent: { label: 'ولي أمر', tabs: [['home', 'متابعة أبنائي'], ['quiz', 'اختبر معلوماتك'], ['profile', 'حسابي']] },
+        student: { label: 'طالب', tabs: [['school', 'دروسي'], ['games', 'ألعابي'], ['quiz', 'اختبر معلوماتك'], ['progress', 'تقدمي'], ['profile', 'حسابي']] },
     };
 
     function renderTabs() {
@@ -640,6 +640,104 @@
         renderQ();
     }
     el('modal').onclick = (e) => { if (e.target.id === 'modal') el('modal').classList.add('hidden'); };
+
+    // ---------------- Curriculum self-test (اختبر معلوماتك) ----------------
+    // A standalone page: the learner picks a grade (and optionally a subject)
+    // and answers multiple-choice questions drawn from the stored curriculum.
+    // Every answer reveals the lesson/unit/page it came from, so the quiz stays
+    // grounded in the textbook instead of model guesses.
+    routes['quiz'] = async function quizScreen() {
+        busy(true);
+        const { grades } = await API.get('/grades', { auth: false });
+        const myGradeId = state.user.student_profile ? state.user.student_profile.grade_id : null;
+        const grade = grades.find((g) => g.id === myGradeId) || grades[0];
+        view.innerHTML = `
+        <div class="crumbs"><a href="#/home">لوحتي</a> › <span>اختبر معلوماتك</span></div>
+        <h2>📝 اختبر معلوماتك من المنهج</h2>
+        <p class="muted">أسئلة اختيار من متعدد مأخوذة من دروس المنهج اليمني، ومع كل إجابة الدليل من الكتاب نفسه.</p>
+        <div class="card quiz-filters">
+            <label>الصف<select id="quizGrade">${grades.map((g) => `<option value="${g.id}"${g.id === grade.id ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+            <label>المادة<select id="quizSubject"><option value="">كل المواد</option></select></label>
+            <button class="btn primary" id="quizStart">ابدأ الاختبار</button>
+        </div>
+        <div id="quizArea"></div>`;
+
+        async function loadSubjects(gradeId) {
+            const { subjects } = await API.get(`/grades/${gradeId}/subjects`, { auth: false });
+            el('quizSubject').innerHTML = '<option value="">كل المواد</option>' +
+                subjects.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+        }
+        await loadSubjects(grade.id);
+        el('quizGrade').onchange = () => loadSubjects(el('quizGrade').value);
+        el('quizStart').onclick = () => startQuiz(el('quizGrade').value, el('quizSubject').value);
+        busy(false);
+    };
+
+    async function startQuiz(gradeId, subjectId) {
+        busy(true);
+        const area = el('quizArea');
+        area.innerHTML = '<p class="muted">جارٍ تحضير الأسئلة…</p>';
+        try {
+            const url = `/quiz?grade_id=${encodeURIComponent(gradeId)}&limit=10`
+                + (subjectId ? `&subject_id=${encodeURIComponent(subjectId)}` : '');
+            const d = await API.get(url, { auth: false });
+            renderQuiz(area, d);
+        } catch (e) {
+            area.innerHTML = `<div class="card error">${esc(e.message)}</div>`;
+        } finally { busy(false); }
+    }
+
+    function renderQuiz(area, d) {
+        const questions = d.questions || [];
+        if (!questions.length) {
+            area.innerHTML = '<div class="card"><p class="muted">لا توجد أسئلة متاحة لهذه المادة بعد. اختر مادة أخرى.</p></div>';
+            return;
+        }
+        const scope = [d.subject ? d.subject.name : 'كل المواد', d.grade ? d.grade.name : '']
+            .filter(Boolean).join(' — ');
+        area.innerHTML = `
+        <div class="quiz-head">
+            <span class="badge">${esc(scope)}</span>
+            <span class="muted small">${questions.length} سؤال</span>
+            <span class="quiz-score" id="quizScore">0 / ${questions.length}</span>
+        </div>
+        <div id="quizList">${questions.map((q, i) => `
+            <div class="card quiz-q" data-q="${i}">
+                <div class="ex-q"><span class="badge">سؤال ${i + 1}</span> ${esc(q.prompt)}</div>
+                <div class="opts">${q.options.map((o) => `<button class="btn opt-btn" data-opt="${esc(o.text)}">${esc(o.text)}</button>`).join('')}</div>
+                <div class="quiz-fb"></div>
+            </div>`).join('')}</div>`;
+
+        let answered = 0;
+        let correct = 0;
+        el('quizList').querySelectorAll('.quiz-q').forEach((card) => {
+            const q = questions[+card.dataset.q];
+            const fb = card.querySelector('.quiz-fb');
+            card.querySelectorAll('[data-opt]').forEach((btn) => {
+                btn.onclick = () => {
+                    if (card.dataset.done) return;
+                    card.dataset.done = '1';
+                    const ok = btn.dataset.opt === q.answer;
+                    answered++;
+                    if (ok) correct++;
+                    card.querySelectorAll('[data-opt]').forEach((b) => {
+                        b.disabled = true;
+                        if (b.dataset.opt === q.answer) b.classList.add('correct');
+                        else if (b === btn) b.classList.add('wrong');
+                    });
+                    fb.className = 'quiz-fb ' + (ok ? 'ok' : 'bad');
+                    fb.innerHTML = `<div>${ok ? '✅ إجابة صحيحة' : '❌ إجابة غير صحيحة — الصواب: ' + esc(q.answer)}</div>
+                        <div class="quiz-evidence">📖 الدليل من المنهج: ${esc(q.evidence)}</div>`;
+                    const score = el('quizScore');
+                    if (score) score.textContent = `${correct} / ${answered}`;
+                    if (answered === questions.length) {
+                        const score2 = el('quizScore');
+                        if (score2) score2.textContent = `${correct} / ${questions.length} ✅`;
+                    }
+                };
+            });
+        });
+    }
 
     // ---------------- Book page viewer ----------------
     // Shows the lesson's actual textbook pages (rendered server-side from the
