@@ -134,5 +134,9 @@ return [
     'db_snapshots' => [
         'path' => env('DB_SNAPSHOT_PATH', storage_path('app/db-snapshots')),
         'keep' => (int) env('DB_SNAPSHOT_KEEP', 0),
+        // Snapshot automatically before migrate:fresh / db:seed etc., keeping
+        // only the newest few "auto pre-*" snapshots so backups cannot pile up.
+        'before_destructive' => (bool) env('DB_SNAPSHOT_BEFORE', true),
+        'pre_command_keep' => (int) env('DB_SNAPSHOT_PRE_KEEP', 5),
     ],
 ];
