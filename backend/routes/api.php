@@ -134,8 +134,12 @@ Route::prefix('v1')->group(function () {
             // Database snapshots (backup / restore).
             Route::get('owner/db-snapshots', [OwnerController::class, 'dbSnapshots']);
             Route::post('owner/db-snapshots', [OwnerController::class, 'createDbSnapshot']);
+            Route::post('owner/db-snapshots/upload', [OwnerController::class, 'uploadDbSnapshot']);
             Route::post('owner/db-snapshots/restore', [OwnerController::class, 'restoreDbSnapshot']);
             Route::get('owner/db-snapshots/download', [OwnerController::class, 'downloadDbSnapshot']);
+            // Platform report (PDF download).
+            Route::get('owner/platform-report', [OwnerController::class, 'platformReport']);
+            Route::get('owner/platform-report/download', [OwnerController::class, 'downloadPlatformReport']);
         });
     });
 });

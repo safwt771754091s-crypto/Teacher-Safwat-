@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\DatabaseSnapshotService;
+use App\Services\PlatformReportService;
 use Illuminate\Http\Request;
 use Throwable;
 
@@ -131,6 +132,8 @@ class OwnerController extends Controller
             'snapshots' => $snapshots->list(),
             'driver' => $snapshots->driver(),
             'directory' => $snapshots->directory(),
+            'uploads_enabled' => $snapshots->uploadsEnabled(),
+            'remote_target' => $snapshots->remoteTarget(),
         ]);
     }
 
@@ -139,7 +142,7 @@ class OwnerController extends Controller
         $data = $request->validate(['label' => ['nullable', 'string', 'max:200']]);
 
         try {
-            $meta = $snapshots->create(label: $data['label'] ?? null);
+            $meta = $snapshots->createAndUpload(label: $data['label'] ?? null);
         } catch (Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -147,11 +150,32 @@ class OwnerController extends Controller
         return response()->json(['snapshot' => $meta], 201);
     }
 
+    public function uploadDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
+
+        if (! $snapshots->uploadsEnabled()) {
+            return response()->json(['message' => 'التخزين البعيد غير مُفعّل.'], 422);
+        }
+
+        try {
+            $target = $snapshots->upload($data['name']);
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'تعذّر رفع اللقطة: ' . $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'تم رفع اللقطة إلى التخزين البعيد.', 'remote' => $target]);
+    }
+
     public function restoreDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
     {
         $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
 
-        $path = $snapshots->path($data['name']);
+        try {
+            $path = $snapshots->localPath($data['name']);
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: ' . $e->getMessage()], 422);
+        }
         if (! $path) {
             return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
         }
@@ -168,11 +192,33 @@ class OwnerController extends Controller
     public function downloadDbSnapshot(Request $request, DatabaseSnapshotService $snapshots)
     {
         $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
-        $path = $snapshots->path($data['name']);
+
+        try {
+            $path = $snapshots->localPath($data['name']);
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: ' . $e->getMessage()], 422);
+        }
         if (! $path) {
             return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
         }
 
         return response()->download($path, basename($path), ['Content-Type' => 'application/gzip']);
+    }
+
+    // ---------------- Platform report ----------------
+
+    public function platformReport(PlatformReportService $report)
+    {
+        return response()->json(['stats' => $report->stats(), 'coverage' => $report->coverage()]);
+    }
+
+    public function downloadPlatformReport(PlatformReportService $report)
+    {
+        $name = 'platform-report-' . gmdate('Ymd-His');
+
+        return response($report->pdf(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="report.pdf"; filename*=UTF-8\'\'' . rawurlencode($name . '.pdf'),
+        ]);
     }
 }

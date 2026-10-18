@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Throwable;
 
@@ -58,6 +59,134 @@ class DatabaseSnapshotService
         @file_put_contents($path . '.json', json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
         return $meta;
+    }
+
+    /**
+     * Snapshot and, when a remote disk is configured, upload it there so the
+     * backup survives a local wipe. Returns the local metadata plus a `remote`
+     * key ("disk:path", or null when uploads are off).
+     *
+     * @return array<string, mixed>
+     */
+    public function createAndUpload(?string $directory = null, ?string $label = null): array
+    {
+        $meta = $this->create($directory, $label);
+
+        return array_merge($meta, ['remote' => $this->upload($meta['name'], $directory)]);
+    }
+
+    /** Upload a snapshot (and its sidecar) to the configured remote disk. */
+    public function upload(string $name, ?string $directory = null): ?string
+    {
+        if (! $this->uploadsEnabled()) {
+            return null;
+        }
+
+        $path = $this->path($name, $directory);
+        if (! $path) {
+            throw new RuntimeException('لم يُعثر على اللقطة للرفع: ' . $name);
+        }
+
+        $disk = (string) config('platform.db_snapshots.remote.disk', 'supabase');
+        $prefix = trim((string) config('platform.db_snapshots.remote.path', 'db-snapshots'), '/');
+        $target = $prefix . '/' . $name;
+
+        $files = Storage::disk($disk);
+        $files->put($target, (string) file_get_contents($path), ['ContentType' => 'application/gzip']);
+        if (is_file($path . '.json')) {
+            $files->put($target . '.json', (string) file_get_contents($path . '.json'), ['ContentType' => 'application/json']);
+        }
+
+        return $disk . ':' . $target;
+    }
+
+    /**
+     * Ensure a snapshot exists locally, downloading it from the remote disk when
+     * it is missing (e.g. after a sandbox reset). Returns the local path or null.
+     */
+    public function localPath(string $name, ?string $directory = null): ?string
+    {
+        $path = $this->path($name, $directory);
+        if ($path) {
+            return $path;
+        }
+        if (! $this->uploadsEnabled()) {
+            return null;
+        }
+
+        $disk = (string) config('platform.db_snapshots.remote.disk', 'supabase');
+        $prefix = trim((string) config('platform.db_snapshots.remote.path', 'db-snapshots'), '/');
+        $remote = $prefix . '/' . $name;
+        $files = Storage::disk($disk);
+        if (! $files->exists($remote)) {
+            return null;
+        }
+
+        $directory = $directory ?: $this->directory();
+        if (! is_dir($directory)) {
+            @mkdir($directory, 0775, true);
+        }
+        $target = rtrim($directory, '/') . '/' . $name;
+        if (@file_put_contents($target, (string) $files->get($remote)) === false) {
+            throw new RuntimeException('تعذّر تنزيل اللقطة من التخزين البعيد: ' . $name);
+        }
+        if ($files->exists($remote . '.json')) {
+            @file_put_contents($target . '.json', (string) $files->get($remote . '.json'));
+        }
+
+        return $target;
+    }
+
+    /** @return list<array<string, mixed>> snapshots stored on the remote disk */
+    public function listRemote(): array
+    {
+        if (! $this->uploadsEnabled()) {
+            return [];
+        }
+
+        $disk = (string) config('platform.db_snapshots.remote.disk', 'supabase');
+        $prefix = trim((string) config('platform.db_snapshots.remote.path', 'db-snapshots'), '/');
+        $files = Storage::disk($disk);
+
+        $out = [];
+        foreach ($files->files($prefix) as $file) {
+            if (! str_ends_with($file, '.sql.gz')) {
+                continue;
+            }
+            $name = basename($file);
+            $meta = [];
+            if ($files->exists($file . '.json')) {
+                $meta = json_decode((string) $files->get($file . '.json'), true) ?: [];
+            }
+            $out[] = [
+                'name' => $name,
+                'remote' => $disk . ':' . $file,
+                'bytes' => $files->size($file) ?: 0,
+                'created_at' => $meta['created_at'] ?? date('c', $files->lastModified($file)),
+                'label' => $meta['label'] ?? null,
+                'tables' => $meta['tables'] ?? null,
+                'rows' => $meta['rows'] ?? null,
+            ];
+        }
+
+        usort($out, fn ($a, $b) => strcmp((string) $b['created_at'], (string) $a['created_at']));
+
+        return $out;
+    }
+
+    public function uploadsEnabled(): bool
+    {
+        return (bool) config('platform.db_snapshots.remote.enabled', false);
+    }
+
+    public function remoteTarget(): ?string
+    {
+        if (! $this->uploadsEnabled()) {
+            return null;
+        }
+
+        return (string) config('platform.db_snapshots.remote.disk', 'supabase')
+            . ':' . trim((string) config('platform.db_snapshots.remote.path', 'db-snapshots'), '/');
     }
 
     /** @return list<array<string, mixed>> newest first */

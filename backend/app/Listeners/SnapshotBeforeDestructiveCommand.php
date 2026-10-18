@@ -34,7 +34,7 @@ class SnapshotBeforeDestructiveCommand
             if ($this->snapshots->tableTotal() < 1) {
                 return;
             }
-            $this->snapshots->create(label: 'auto pre-'.$event->command);
+            $this->snapshots->createAndUpload(label: 'auto pre-'.$event->command);
 
             $keep = (int) config('platform.db_snapshots.pre_command_keep', 5);
             if ($keep > 0) {
