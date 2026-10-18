@@ -1105,20 +1105,52 @@
                 <input id="snapLabel" placeholder="تعليق على اللقطة (اختياري)">
                 <button class="btn primary" id="snapCreate">إنشاء لقطة</button>
             </div>
+            <div id="snapRemoteInfo" class="muted small"></div>
             <div id="snapsArea" class="muted small">جارٍ التحميل…</div>
+        </div>
+        <div class="card">
+            <h3>📄 تقرير المنصة (PDF)</h3>
+            <p class="muted small">ملخّص شامل: أعداد الصفوف والمواد والكتب والدروس والمستخدمين والنشاط وتكلفة الذكاء الاصطناعي، مع تغطية المنهج حسب الصف. يُنزَّل كملف PDF جاهز للطباعة.</p>
+            <button class="btn primary" id="reportDownload">⬇️ تحميل تقرير المنصة (PDF)</button>
         </div>`;
         el('uLoadBtn').onclick = loadUsers;
         el('snapCreate').onclick = createDbSnapshot;
+        if (el('reportDownload')) el('reportDownload').onclick = downloadPlatformReport;
         await loadUsers();
         await loadDbSnapshots();
         busy(false);
     };
+
+    // Download the whole-platform PDF report with the bearer token.
+    async function downloadPlatformReport() {
+        try {
+            const res = await fetch(`${API.API_BASE}/owner/platform-report/download`, {
+                headers: { 'Authorization': 'Bearer ' + (state.token || '') },
+            });
+            if (!res.ok) throw new Error('تعذّر إنشاء التقرير');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `platform-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) { toast(e.message, 'error'); }
+    }
 
     async function loadDbSnapshots() {
         const area = el('snapsArea');
         if (!area) return;
         try {
             const d = await API.get('/owner/db-snapshots');
+            const info = el('snapRemoteInfo');
+            if (info) {
+                info.innerHTML = d.uploads_enabled
+                    ? `التخزين البعيد مُفعّل — تُرفع اللقطات إلى <b>${esc(d.remote_target || '')}</b>.`
+                    : 'التخزين البعيد غير مُفعّل (اضبط DB_SNAPSHOT_REMOTE=1 لنسخ احتياطي دائم).';
+            }
             const snaps = d.snapshots || [];
             if (!snaps.length) {
                 area.innerHTML = '<p class="muted">لا توجد لقطات بعد. اضغط «إنشاء لقطة» لحفظ نسخة الآن.</p>';
@@ -1131,10 +1163,17 @@
                     <td class="small">${s.tables == null ? '-' : s.tables} / ${s.rows == null ? '-' : s.rows}</td>
                     <td class="small">${Math.round((s.bytes || 0) / 1024)} KB</td>
                     <td><button class="btn small" data-download="${esc(s.name)}">تنزيل</button>
+                        ${d.uploads_enabled ? `<button class="btn small" data-upload="${esc(s.name)}">رفع</button>` : ''}
                         <button class="btn small" data-restore="${esc(s.name)}">استعادة</button></td>
                 </tr>`).join('') + `</tbody></table>`;
             area.querySelectorAll('[data-download]').forEach((b) => {
                 b.onclick = () => downloadDbSnapshot(b.dataset.download);
+            });
+            area.querySelectorAll('[data-upload]').forEach((b) => {
+                b.onclick = async () => {
+                    try { const r = await API.post('/owner/db-snapshots/upload', { name: b.dataset.upload }); toast(r.message || 'تم الرفع'); }
+                    catch (e) { toast(e.message, 'error'); }
+                };
             });
             area.querySelectorAll('[data-restore]').forEach((b) => {
                 b.onclick = async () => {
