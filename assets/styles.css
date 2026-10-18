@@ -250,3 +250,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 @keyframes bootspin { to { transform: rotate(360deg); } }
 .offline-card { max-width: 520px; margin: 40px auto; text-align: center; }
 .offline-card .btn { margin-top: 10px; }
+
+/* Curriculum self-test (اختبر معلوماتك) */
+.quiz-filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.quiz-filters label { flex: 1 1 180px; margin: 0; }
+.quiz-filters .btn { flex: 0 0 auto; }
+.quiz-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; }
+.quiz-score { margin-inline-start: auto; font-weight: 800; color: var(--green-dark); }
+.quiz-q { margin-bottom: 14px; }
+.opt-btn { width: 100%; text-align: start; justify-content: flex-start; }
+.opt-btn.correct { background: var(--green-light); border-color: var(--green); color: var(--green-dark); font-weight: 800; }
+.opt-btn.wrong { background: #fdecec; border-color: var(--danger); color: var(--danger); font-weight: 800; }
+.quiz-fb { margin-top: 10px; font-weight: 700; }
+.quiz-fb.ok { color: var(--ok); }
+.quiz-fb.bad { color: var(--danger); }
+.quiz-evidence { margin-top: 6px; font-weight: 500; color: var(--muted); background: var(--bg); border-inline-start: 3px solid var(--green); border-radius: 8px; padding: 8px 12px; }
