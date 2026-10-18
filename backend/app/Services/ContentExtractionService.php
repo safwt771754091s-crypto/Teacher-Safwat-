@@ -329,7 +329,7 @@ class ContentExtractionService
         for ($attempt = 0; $attempt < 2; $attempt++) {
             $temp = tempnam(sys_get_temp_dir(), 'tbk_pdf_');
             @shell_exec(sprintf(
-                'curl -sL --fail --max-time 180 --retry 2 --retry-connrefused -A %s -o %s %s 2>/dev/null',
+                'curl -sL --fail --connect-timeout 10 --max-time 60 --retry 2 --retry-connrefused -A %s -o %s %s 2>/dev/null',
                 escapeshellarg($userAgent),
                 escapeshellarg($temp),
                 escapeshellarg($url),
@@ -377,7 +377,7 @@ class ContentExtractionService
         $tmp = sys_get_temp_dir() . '/pg_' . bin2hex(random_bytes(6));
         try {
             @shell_exec(sprintf(
-                '%s -f %d -l %d -r %d -png -singlefile %s %s 2>/dev/null',
+                'timeout 120 %s -f %d -l %d -r %d -png -singlefile %s %s 2>/dev/null',
                 escapeshellarg(config('platform.ocr.pdftoppm')),
                 $pageNumber,
                 $pageNumber,
