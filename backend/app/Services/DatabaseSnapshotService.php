@@ -103,10 +103,13 @@ class DatabaseSnapshotService
     }
 
     /** Delete all but the newest $keep snapshots. Returns the names removed. */
-    public function prune(int $keep, ?string $directory = null): array
+    public function prune(int $keep, ?string $directory = null, ?string $labelPrefix = null): array
     {
         $removed = [];
-        $list = $this->list($directory);
+        $list = array_values(array_filter(
+            $this->list($directory),
+            fn ($s) => $labelPrefix === null || str_starts_with((string) ($s['label'] ?? ''), $labelPrefix)
+        ));
         foreach (array_slice($list, max(0, $keep)) as $snap) {
             $path = $this->path($snap['name'], $directory);
             if ($path) {
@@ -117,6 +120,29 @@ class DatabaseSnapshotService
         }
 
         return $removed;
+    }
+
+    /** Number of user tables, or 0 when the connection is unreachable or empty. */
+    public function tableTotal(): int
+    {
+        try {
+            $pdo = DB::connection()->getPdo();
+
+            return match ($this->driver()) {
+                'sqlite' => (int) $pdo->query(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )->fetchColumn(),
+                'pgsql' => (int) $pdo->query(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'"
+                )->fetchColumn(),
+                'mysql', 'mariadb' => (int) $pdo->query(
+                    'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()'
+                )->fetchColumn(),
+                default => 0,
+            };
+        } catch (Throwable) {
+            return 0;
+        }
     }
 
     /**

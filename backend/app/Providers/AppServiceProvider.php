@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Listeners\SnapshotBeforeDestructiveCommand;
+use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,6 +22,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Safety net: snapshot the database before a destructive migrate/seed.
+        Event::listen(CommandStarting::class, SnapshotBeforeDestructiveCommand::class);
     }
 }

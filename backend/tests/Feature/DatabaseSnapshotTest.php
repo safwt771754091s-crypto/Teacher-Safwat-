@@ -2,12 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Listeners\SnapshotBeforeDestructiveCommand;
 use App\Models\Grade;
 use App\Models\Lesson;
 use App\Models\User;
 use App\Services\DatabaseSnapshotService;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Tests\TestCase;
 
 /**
@@ -29,7 +33,12 @@ class DatabaseSnapshotTest extends TestCase
         parent::setUp();
         $this->dir = storage_path('framework/testing/db-snapshots-' . uniqid());
         @mkdir($this->dir, 0775, true);
-        config(['platform.db_snapshots.path' => $this->dir]);
+        config([
+            'platform.db_snapshots.path' => $this->dir,
+            // phpunit.xml disables the safety net (DB_SNAPSHOT_BEFORE=0); enable
+            // it per-test so the listener logic can be exercised.
+            'platform.db_snapshots.before_destructive' => true,
+        ]);
     }
 
     protected function tearDown(): void
@@ -129,5 +138,72 @@ class DatabaseSnapshotTest extends TestCase
             ->get('/api/v1/owner/db-snapshots/download?name=' . $meta['name'])
             ->assertOk()
             ->assertHeader('content-type', 'application/gzip');
+    }
+
+    // --- automatic pre-command safety net ------------------------------------
+
+    public function test_it_snapshots_before_a_destructive_command(): void
+    {
+        $this->realListener()->handle(new CommandStarting('migrate:fresh', new ArrayInput([]), new BufferedOutput));
+
+        $snapshots = app(DatabaseSnapshotService::class)->list();
+        $this->assertCount(1, $snapshots);
+        $this->assertSame('auto pre-migrate:fresh', $snapshots[0]['label']);
+    }
+
+    public function test_it_skips_non_destructive_commands(): void
+    {
+        $this->realListener()->handle(new CommandStarting('migrate', new ArrayInput([]), new BufferedOutput));
+
+        $this->assertCount(0, app(DatabaseSnapshotService::class)->list());
+    }
+
+    public function test_it_can_be_disabled_by_config(): void
+    {
+        config(['platform.db_snapshots.before_destructive' => false]);
+
+        $this->realListener()->handle(new CommandStarting('db:seed', new ArrayInput([]), new BufferedOutput));
+
+        $this->assertCount(0, app(DatabaseSnapshotService::class)->list());
+    }
+
+    public function test_it_keeps_only_the_newest_automatic_snapshots(): void
+    {
+        config(['platform.db_snapshots.pre_command_keep' => 2]);
+        $service = app(DatabaseSnapshotService::class);
+        $listener = $this->realListener();
+
+        foreach (range(1, 3) as $i) {
+            sleep(1); // distinct timestamp in the file name
+            $listener->handle(new CommandStarting('migrate:fresh', new ArrayInput([]), new BufferedOutput));
+        }
+
+        $automatic = array_values(array_filter(
+            $service->list(),
+            fn ($s) => str_starts_with((string) $s['label'], 'auto pre-')
+        ));
+        $this->assertCount(2, $automatic);
+    }
+
+    public function test_it_does_not_snapshot_when_there_are_no_tables(): void
+    {
+        // A brand-new/empty database has nothing worth saving.
+        $service = new class extends DatabaseSnapshotService
+        {
+            public function tableTotal(): int
+            {
+                return 0;
+            }
+        };
+
+        (new SnapshotBeforeDestructiveCommand($service))
+            ->handle(new CommandStarting('migrate:fresh', new ArrayInput([]), new BufferedOutput));
+
+        $this->assertCount(0, app(DatabaseSnapshotService::class)->list());
+    }
+
+    private function realListener(): SnapshotBeforeDestructiveCommand
+    {
+        return new SnapshotBeforeDestructiveCommand(app(DatabaseSnapshotService::class));
     }
 }
