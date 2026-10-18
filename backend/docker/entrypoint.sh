@@ -71,4 +71,13 @@ fi
 php artisan config:cache
 php artisan route:cache || true
 
-exec php artisan serve --host=0.0.0.0 --port="${PORT:-8080}"
+# Serve with a small pool of workers. PHP's built-in server is single-threaded
+# by default, so one slow request (rendering a book page downloads and
+# rasterises the whole PDF, which can take tens of seconds) would block the
+# health check and make Render restart a healthy instance. A worker pool lets
+# the health check and other requests be served while a render is in flight.
+# PHP_CLI_SERVER_WORKERS is only honoured together with --no-reload.
+# Three workers fit comfortably in the free plan's 512 MB alongside the master
+# process and a transient PDF render; override with the env var to scale.
+export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-3}"
+exec php artisan serve --host=0.0.0.0 --port="${PORT:-8080}" --no-reload
