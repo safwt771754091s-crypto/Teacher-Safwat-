@@ -131,6 +131,11 @@ Route::prefix('v1')->group(function () {
             Route::post('owner/settings', [OwnerController::class, 'updateSettings']);
             Route::get('owner/errors', [OwnerController::class, 'errors']);
             Route::post('owner/assign-teacher', [TeacherController::class, 'assignTeacher']);
+            // Database snapshots (backup / restore).
+            Route::get('owner/db-snapshots', [OwnerController::class, 'dbSnapshots']);
+            Route::post('owner/db-snapshots', [OwnerController::class, 'createDbSnapshot']);
+            Route::post('owner/db-snapshots/restore', [OwnerController::class, 'restoreDbSnapshot']);
+            Route::get('owner/db-snapshots/download', [OwnerController::class, 'downloadDbSnapshot']);
         });
     });
 });

@@ -122,4 +122,17 @@ return [
         'points_per_correct' => 10,
         'stars_perfect' => 3,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database snapshots
+    |--------------------------------------------------------------------------
+    | Portable SQL dumps written by `php artisan platform:db-snapshot` and the
+    | owner dashboard. Kept on the app's private disk by default; point
+    | DB_SNAPSHOT_PATH elsewhere (e.g. a mounted volume) to persist them.
+    */
+    'db_snapshots' => [
+        'path' => env('DB_SNAPSHOT_PATH', storage_path('app/db-snapshots')),
+        'keep' => (int) env('DB_SNAPSHOT_KEEP', 0),
+    ],
 ];
