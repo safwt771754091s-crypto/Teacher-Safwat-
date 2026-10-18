@@ -26,6 +26,12 @@ class CurriculumController extends Controller
     public function textbooks(Subject $subject, Request $request)
     {
         $query = $subject->textbooks()->withCount('lessons');
+        // Hide catalogue-only rows (no lessons/pages) from learners so an empty
+        // placeholder never leads to a dead book view; admins pass ?all=1 to
+        // still see and manage them.
+        if (! $request->boolean('all')) {
+            $query->has('lessons');
+        }
         if ($authority = $request->query('authority')) {
             $query->whereIn('authority', [$authority, 'common']);
         }

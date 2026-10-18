@@ -94,4 +94,38 @@ class TextbookStorageTest extends TestCase
 
         return app(TextbookExportService::class)->pdf($html);
     }
+
+    public function test_source_url_is_trimmed_on_save(): void
+    {
+        $book = Textbook::whereHas('lessons')->firstOrFail();
+        $book->source_url = "  https://example.test/book.pdf\n";
+        $book->save();
+
+        $this->assertSame('https://example.test/book.pdf', $book->fresh()->source_url);
+    }
+
+    public function test_manual_book_without_pdf_renders_a_text_page_image(): void
+    {
+        // Books with no source PDF (catalogue-only "manual" rows) must still
+        // produce a page image from their stored text instead of failing.
+        if (trim((string) @shell_exec('command -v pdftoppm 2>/dev/null')) === '') {
+            $this->markTestSkipped('pdftoppm is not installed.');
+        }
+
+        $book = Textbook::create([
+            'subject_id' => Textbook::whereHas('lessons')->firstOrFail()->subject_id,
+            'title' => 'كتاب نصي', 'term' => 'first', 'source_type' => 'manual',
+            'file_path' => null, 'source_url' => null, 'status' => 'published',
+        ]);
+        $book->pages()->create([
+            'page_number' => 1,
+            'extracted_text' => 'درس: أسرتي وبيتي. نتعرف في هذا الدرس على أفراد الأسرة.',
+            'status' => 'extracted',
+        ]);
+
+        $png = app(ContentExtractionService::class)->pageImage($book, 1);
+
+        $this->assertNotNull($png);
+        $this->assertStringStartsWith("\x89PNG", $png);
+    }
 }

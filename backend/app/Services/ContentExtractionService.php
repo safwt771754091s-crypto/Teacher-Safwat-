@@ -206,13 +206,21 @@ class ContentExtractionService
         // 2. Render from the book's PDF, then cache the PNG on the storage disk
         //    so later views (and other students) skip the download + rasterise.
         $png = $this->withTextbookPdf($textbook, fn (string $pdf) => $this->renderPdfPage($pdf, $pageNumber));
-        if ($png === null) {
+        if ($png !== null) {
+            $this->cachePageImage($textbook, $pageNumber, $png);
+
+            return $png;
+        }
+
+        // 3. No source PDF (e.g. a catalogue-only "manual" book): render the
+        //    stored page text as an image so the viewer still shows the page
+        //    instead of failing. Clearly labelled as a text page, not the scan.
+        $text = $page ? trim((string) $page->extracted_text) : '';
+        if ($text === '') {
             return null;
         }
 
-        $this->cachePageImage($textbook, $pageNumber, $png);
-
-        return $png;
+        return $this->renderTextPage($textbook, $pageNumber, $text);
     }
 
     /**
@@ -286,23 +294,79 @@ class ContentExtractionService
             return null;
         }
 
-        $temp = tempnam(sys_get_temp_dir(), 'tbk_pdf_');
+        $pdf = $this->downloadPdf($textbook->source_url);
+        if ($pdf === null) {
+            return null;
+        }
+
         try {
+            return $fn($pdf);
+        } finally {
+            if (is_file($pdf)) {
+                @unlink($pdf);
+            }
+        }
+    }
+
+    /**
+     * Download a textbook PDF to a temp file. Returns the path, or null.
+     *
+     * Handles the sources seen in the wild: URLs stored with stray whitespace,
+     * hosts that reject requests without a browser User-Agent, Google Drive
+     * "view" links (which must be rewritten to a direct download), and flaky
+     * connections (retried once). Verifies the result really is a PDF so an HTML
+     * error page is never handed to the renderer.
+     */
+    private function downloadPdf(string $url): ?string
+    {
+        $url = $this->normalizePdfUrl(trim($url));
+        if ($url === '') {
+            return null;
+        }
+
+        $userAgent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $temp = tempnam(sys_get_temp_dir(), 'tbk_pdf_');
             @shell_exec(sprintf(
-                'curl -sL --fail --max-time 120 -o %s %s 2>/dev/null',
+                'curl -sL --fail --max-time 180 --retry 2 --retry-connrefused -A %s -o %s %s 2>/dev/null',
+                escapeshellarg($userAgent),
                 escapeshellarg($temp),
-                escapeshellarg($textbook->source_url),
+                escapeshellarg($url),
             ));
-            if (! is_file($temp) || filesize($temp) < 1024) {
-                return null;
+
+            $ok = is_file($temp)
+                && filesize($temp) >= 1024
+                && (string) file_get_contents($temp, false, null, 0, 5) === '%PDF-';
+
+            if ($ok) {
+                return $temp;
             }
 
-            return $fn($temp);
-        } finally {
             if (is_file($temp)) {
                 @unlink($temp);
             }
         }
+
+        return null;
+    }
+
+    /**
+     * Rewrite known non-direct URLs into a form curl can download: Google Drive
+     * "/file/d/<id>/view" and "open?id=<id>" become the "uc?export=download" link.
+     */
+    private function normalizePdfUrl(string $url): string
+    {
+        if (str_contains($url, 'drive.google.com')) {
+            if (preg_match('#/file/d/([^/]+)#', $url, $m)) {
+                return 'https://drive.google.com/uc?export=download&id=' . $m[1];
+            }
+            if (preg_match('#[?&]id=([^&]+)#', $url, $m)) {
+                return 'https://drive.google.com/uc?export=download&id=' . $m[1];
+            }
+        }
+
+        return $url;
     }
 
     /**
@@ -327,6 +391,61 @@ class ContentExtractionService
         } finally {
             if (is_file($tmp . '.png')) {
                 @unlink($tmp . '.png');
+            }
+        }
+    }
+
+    /**
+     * Render a page's stored text as a PNG via mPDF (Arabic/RTL aware), for books
+     * that have no source PDF. Rendered at A4 and rasterised with pdftoppm so the
+     * result is a normal page image the viewer can show like any other.
+     */
+    private function renderTextPage(Textbook $textbook, int $pageNumber, string $text): ?string
+    {
+        if (! $this->binaryExists(config('platform.ocr.pdftoppm'))) {
+            return null;
+        }
+
+        $title = e($textbook->title ?: '');
+        $subject = e((string) ($textbook->subject->name ?? ''));
+        $body = nl2br(e($text));
+
+        $html = <<<HTML
+        <html dir="rtl"><head><style>
+        body { font-family: sans-serif; }
+        .head { border-bottom: 2px solid #2f6a43; padding-bottom: 6px; margin-bottom: 14px; }
+        .head h1 { font-size: 16pt; color: #2f6a43; margin: 0; }
+        .head .meta { color: #555; font-size: 10pt; }
+        .note { background: #f4f7f2; border: 1px solid #cfe0c9; padding: 6px 8px; font-size: 9pt; color: #446; margin-bottom: 12px; }
+        .text { font-size: 14pt; line-height: 1.9; }
+        </style></head><body>
+        <div class="head"><h1>{$title}</h1><div class="meta">{$subject} — صفحة {$pageNumber}</div></div>
+        <div class="note">هذه صفحة نصية مستخرجة من الكتاب (لا تتوفر نسخة مصوّرة بعد).</div>
+        <div class="text">{$body}</div>
+        </body></html>
+        HTML;
+
+        $pdfPath = null;
+        try {
+            $mpdf = new \Mpdf\Mpdf([
+                'mode' => 'utf-8',
+                'format' => 'A4',
+                'tempDir' => sys_get_temp_dir(),
+                'autoScriptToLang' => true,
+                'autoLangToFont' => true,
+            ]);
+            $mpdf->SetDirectionality('rtl');
+            $mpdf->WriteHTML($html);
+
+            $pdfPath = sys_get_temp_dir() . '/tpg_' . bin2hex(random_bytes(6)) . '.pdf';
+            $mpdf->Output($pdfPath, \Mpdf\Output\Destination::FILE);
+
+            return $this->renderPdfPage($pdfPath, 1);
+        } catch (\Throwable $e) {
+            return null;
+        } finally {
+            if ($pdfPath && is_file($pdfPath)) {
+                @unlink($pdfPath);
             }
         }
     }

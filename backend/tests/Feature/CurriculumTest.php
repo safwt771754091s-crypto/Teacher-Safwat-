@@ -43,14 +43,19 @@ class CurriculumTest extends TestCase
     {
         $grade = Grade::where('level', 1)->first();
         $subject = $grade->subjects()->first();
-        $subject->textbooks()->create([
+        $aden = $subject->textbooks()->create([
             'title' => 'كتاب منهج عدن', 'term' => 'first', 'source_type' => 'pdf',
             'authority' => 'aden', 'status' => 'published',
         ]);
-        $subject->textbooks()->create([
+        $sanaa = $subject->textbooks()->create([
             'title' => 'كتاب منهج صنعاء', 'term' => 'first', 'source_type' => 'pdf',
             'authority' => 'sanaa', 'status' => 'published',
         ]);
+        // Catalogue-only books (no lessons) are hidden from learners, so give
+        // each a lesson to make it a real, listed book.
+        foreach ([$aden, $sanaa] as $book) {
+            $book->lessons()->create(['title' => 'درس', 'page_from' => 1, 'page_to' => 2, 'status' => 'published']);
+        }
 
         $all = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks")->assertOk();
         $this->assertArrayHasKey('authorities', $all->json());
@@ -59,6 +64,16 @@ class CurriculumTest extends TestCase
         $titles = collect($aden->json('textbooks'))->pluck('title');
         $this->assertTrue($titles->contains('كتاب منهج عدن'));
         $this->assertFalse($titles->contains('كتاب منهج صنعاء'));
+
+        // A catalogue-only book (no lessons) must not be listed to learners, but
+        // stays available to admins via ?all=1.
+        $empty = $subject->textbooks()->create([
+            'title' => 'كتاب بلا دروس', 'term' => 'first', 'source_type' => 'manual', 'status' => 'published',
+        ]);
+        $listed = collect($this->getJson("/api/v1/subjects/{$subject->id}/textbooks")->json('textbooks'))->pluck('id');
+        $this->assertFalse($listed->contains($empty->id));
+        $allListed = collect($this->getJson("/api/v1/subjects/{$subject->id}/textbooks?all=1")->json('textbooks'))->pluck('id');
+        $this->assertTrue($allListed->contains($empty->id));
     }
 
     public function test_page_source_is_retrievable(): void
