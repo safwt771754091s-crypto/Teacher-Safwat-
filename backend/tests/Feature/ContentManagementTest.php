@@ -149,6 +149,77 @@ class ContentManagementTest extends TestCase
             ->assertStatus(201);
     }
 
+    public function test_owner_can_edit_textbook_branch_and_authority(): void
+    {
+        $textbook = Textbook::firstOrFail();
+
+        $this->actingAs($this->owner(), 'sanctum')
+            ->patchJson("/api/v1/textbooks/{$textbook->id}", [
+                'branch' => 'scientific',
+                'authority' => 'aden',
+                'title' => 'عنوان محدّث',
+            ])->assertOk()->assertJsonPath('textbook.branch', 'scientific');
+
+        $this->assertDatabaseHas('textbooks', [
+            'id' => $textbook->id,
+            'branch' => 'scientific',
+            'authority' => 'aden',
+            'title' => 'عنوان محدّث',
+        ]);
+
+        // Invalid branch values are rejected.
+        $this->actingAs($this->owner(), 'sanctum')
+            ->patchJson("/api/v1/textbooks/{$textbook->id}", ['branch' => 'nonsense'])
+            ->assertStatus(422);
+
+        // A student may not edit textbooks.
+        $this->actingAs($this->student(), 'sanctum')
+            ->patchJson("/api/v1/textbooks/{$textbook->id}", ['branch' => 'literary'])
+            ->assertStatus(403);
+    }
+
+    public function test_owner_can_author_section_and_exercise(): void
+    {
+        $lesson = Lesson::firstOrFail();
+
+        $this->actingAs($this->owner(), 'sanctum')
+            ->postJson("/api/v1/lessons/{$lesson->id}/sections", [
+                'type' => 'point',
+                'title' => 'نقطة مهمة',
+                'content' => 'الماء يتجمد عند صفر درجة.',
+                'source_page' => 12,
+            ])->assertStatus(201)->assertJsonPath('section.type', 'point');
+
+        $this->assertDatabaseHas('lesson_sections', [
+            'lesson_id' => $lesson->id,
+            'content' => 'الماء يتجمد عند صفر درجة.',
+            'source_page' => 12,
+        ]);
+
+        $res = $this->actingAs($this->owner(), 'sanctum')
+            ->postJson("/api/v1/lessons/{$lesson->id}/exercises", [
+                'type' => 'mcq',
+                'question' => 'ما ناتج ٢ + ٣؟',
+                'answer' => '٥',
+                'difficulty' => 'easy',
+                'options' => [
+                    ['text' => '٤', 'is_correct' => false],
+                    ['text' => '٥', 'is_correct' => true],
+                ],
+            ])->assertStatus(201);
+
+        $exerciseId = $res->json('exercise.id');
+        $this->assertCount(2, $res->json('exercise.options'));
+        $this->assertDatabaseHas('exercise_options', [
+            'exercise_id' => $exerciseId, 'text' => '٥', 'is_correct' => true,
+        ]);
+
+        // Invalid section type is rejected by validation.
+        $this->actingAs($this->owner(), 'sanctum')
+            ->postJson("/api/v1/lessons/{$lesson->id}/sections", ['type' => 'bogus', 'content' => 'x'])
+            ->assertStatus(422);
+    }
+
     public function test_generate_and_approve_summary_flow(): void
     {
         $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();

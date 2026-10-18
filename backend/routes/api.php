@@ -105,6 +105,7 @@ Route::prefix('v1')->group(function () {
         // Teacher / supervisor: content review and authoring.
         Route::middleware('role:owner,teacher')->group(function () {
             Route::post('textbooks', [TeacherController::class, 'createTextbook']);
+            Route::patch('textbooks/{textbook}', [TeacherController::class, 'updateTextbook']);
             Route::post('textbooks/{textbook}/upload-pdf', [TeacherController::class, 'uploadPdf']);
             Route::post('textbooks/{textbook}/upload-page', [TeacherController::class, 'uploadPage']);
             Route::get('textbooks/{textbook}/pages', [TeacherController::class, 'pages']);
