@@ -55,7 +55,6 @@ a { color: var(--green); text-decoration: none; }
 }
 .icon-btn:hover { background: rgba(255,255,255,.28); }
 .chip { background: rgba(255,255,255,.2); padding: 4px 12px; border-radius: 20px; font-size: .85rem; }
-.chip.offline-chip { background: var(--gold); color: #4a3b00; font-weight: 600; }
 
 /* Sidenav */
 .sidenav {

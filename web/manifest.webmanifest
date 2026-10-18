@@ -1,19 +1,33 @@
 {
-    "name": "معلمي الذكي اليمني",
+    "name": "معلمي الذكي اليمني — معلم منزلي رقمي",
     "short_name": "معلمي الذكي",
     "description": "معلم منزلي رقمي للمنهج اليمني: شرح، تلخيص، صوت، تمارين، وألعاب تعليمية",
     "lang": "ar",
     "dir": "rtl",
     "start_url": "./",
+    "scope": "./",
     "display": "standalone",
+    "orientation": "portrait",
     "background_color": "#f6fbf3",
     "theme_color": "#2f6a43",
     "icons": [
         {
-            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%232f6a43'/><text x='96' y='130' font-size='110' text-anchor='middle'>📚</text></svg>",
+            "src": "assets/icons/icon-192.png",
             "sizes": "192x192",
-            "type": "image/svg+xml",
+            "type": "image/png",
             "purpose": "any"
+        },
+        {
+            "src": "assets/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "assets/icons/icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
         }
     ]
 }
