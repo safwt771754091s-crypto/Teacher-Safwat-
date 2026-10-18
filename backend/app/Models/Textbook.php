@@ -17,6 +17,12 @@ class Textbook extends Model
         return $this->belongsTo(Subject::class);
     }
 
+    /** Stored source URLs are trimmed so trailing whitespace never breaks a fetch. */
+    public function setSourceUrlAttribute(?string $value): void
+    {
+        $this->attributes['source_url'] = $value === null ? null : trim($value);
+    }
+
     public function pages()
     {
         return $this->hasMany(TextbookPage::class)->orderBy('page_number');

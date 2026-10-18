@@ -784,7 +784,9 @@
     async function loadContentBooks() {
         busy(true);
         const sid = el('cSubject').value;
-        const { textbooks } = await API.get(`/subjects/${sid}/textbooks`, { auth: false });
+        // Admin content management must see every book, including catalogue-only
+        // rows that have no lessons yet (those are hidden from learners).
+        const { textbooks } = await API.get(`/subjects/${sid}/textbooks?all=1`, { auth: false });
         el('contentArea').innerHTML = `
         <div class="card">
             <h3>إضافة كتاب جديد</h3>
