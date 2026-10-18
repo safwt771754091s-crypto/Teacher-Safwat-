@@ -50,6 +50,17 @@ else
     php artisan db:seed --force || echo "WARNING: seeding failed; continuing." >&2
 fi
 
+# Attach each book's source PDF from the bundled manifests so the in-app page
+# viewer can render the real textbook pages. The seeder creates the catalogue
+# with firstOrCreate (which never updates existing rows), so on an
+# already-seeded database the URLs must be backfilled here. The command only
+# touches rows whose source_url is still null, so it is safe to re-run.
+for manifest in database/data/yemen_books_all.json database/data/yemen_books_aden.json database/data/yemen_books.json; do
+    if [ -f "$manifest" ]; then
+        php artisan textbooks:backfill-sources "$manifest" || echo "WARNING: backfill from $manifest failed; continuing." >&2
+    fi
+done
+
 # Create the owner from environment secrets when provided. This is how the
 # first production owner is created without shipping credentials in the image.
 if [ -n "${OWNER_EMAIL:-}" ] && [ -n "${OWNER_PASSWORD:-}" ]; then
