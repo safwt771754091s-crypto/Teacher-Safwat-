@@ -868,6 +868,12 @@
     var Interactive = {
         kinds: Object.keys(KINDS),
         supports: function (kind) { return !!KINDS[kind]; },
+        // Lets a companion engine (interactive3d.js) contribute model kinds
+        // without this file having to know anything about them.
+        register: function (kind, factory) {
+            KINDS[kind] = factory;
+            Interactive.kinds = Object.keys(KINDS);
+        },
         render: function (container, spec, opts) {
             container.innerHTML = '';
             container.classList.add('im-model');
