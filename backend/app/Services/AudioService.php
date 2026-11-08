@@ -28,7 +28,8 @@ class AudioService
         $asset = AudioAsset::create([
             'lesson_id' => $lesson->id,
             'text' => $text,
-            'voice' => $voice ?? 'ar-default',
+            // Narration voice: a professional Arabic female teacher voice.
+            'voice' => $voice ?? 'ar-teacher-female',
             'lang' => 'ar',
             'status' => 'ready',
         ]);

@@ -34,7 +34,8 @@ class TextbookExportService
         }
 
         $body = '';
-        foreach ($textbook->lessons as $lesson) {
+        $lessons = $this->publishedLessons($textbook);
+        foreach ($lessons as $lesson) {
             $body .= $this->lessonHtml($lesson);
         }
         $body .= $this->bookPagesHtml($textbook);
@@ -48,7 +49,18 @@ class TextbookExportService
             $textbook->term === 'second' ? 'الفصل الثاني' : 'الفصل الأول',
         ])));
 
-        return $this->document($title, $subtitle, $this->toc($textbook->lessons), $body);
+        return $this->document($title, $subtitle, $this->toc($lessons), $body);
+    }
+
+    /**
+     * Only published lessons belong in a learner-facing export; archived
+     * structural drafts stay out of the downloadable book.
+     *
+     * @return \Illuminate\Support\Collection<int, Lesson>
+     */
+    private function publishedLessons(Textbook $textbook)
+    {
+        return $textbook->lessons->where('status', 'published')->values();
     }
 
     /**
@@ -69,7 +81,7 @@ class TextbookExportService
             foreach ($subject->textbooks as $book) {
                 $toc .= '<li>' . e($subject->name . ' — ' . $book->title) . '</li>';
                 $body .= '<div class="book-break"><h1 class="subject-head">' . e($subject->name) . ' — ' . e($book->title) . '</h1></div>';
-                foreach ($book->lessons as $lesson) {
+                foreach ($this->publishedLessons($book) as $lesson) {
                     $body .= $this->lessonHtml($lesson);
                 }
                 $body .= $this->bookPagesHtml($book);

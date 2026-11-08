@@ -102,6 +102,9 @@ class TtsService
                     'ie' => 'UTF-8',
                     'client' => config('platform.tts.client', 'tw-ob'),
                     'tl' => $lang,
+                    // A slightly slower pace reads like a teacher explaining,
+                    // which is clearer for learners than the default speed.
+                    'ttsspeed' => (string) config('platform.tts.speed', 0.9),
                     'q' => $text,
                 ]);
         } catch (\Throwable $e) {

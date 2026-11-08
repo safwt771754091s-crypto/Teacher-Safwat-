@@ -93,6 +93,9 @@ return [
         'enabled' => (bool) env('TTS_ENABLED', true),
         'base_url' => env('TTS_BASE_URL', 'https://translate.google.com/translate_tts'),
         'client' => env('TTS_CLIENT', 'tw-ob'),
+        // Narration pace. Slightly below 1.0 sounds like a teacher explaining and
+        // is easier to follow than the provider's default speed.
+        'speed' => (float) env('TTS_SPEED', 0.9),
         'timeout' => (int) env('TTS_TIMEOUT', 20),
     ],
 

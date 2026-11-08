@@ -439,6 +439,12 @@
     let voiceEnabled = true;
     let voiceWarned = false;
 
+    // Female teacher voice hints. The lesson narration is meant to sound like a
+    // professional Arabic female teacher (أستاذة), so when a device offers a
+    // known female voice we pick it over an arbitrary match. The server-side
+    // Google TTS voice used as a fallback is already female.
+    const FEMALE_VOICE_HINTS = ['female', 'woman', 'zeina', 'hoda', 'salma', 'amina', 'amira', 'layla', 'laila', 'maryam', 'sana', 'rana', 'dalia', 'laila', 'نساء', 'أنثى', 'امرأة'];
+
     // Voice lists load asynchronously on Chrome; keep the latest set and pick the
     // best voice for the language (an exact match, else any voice for that locale).
     let voices = [];
@@ -454,9 +460,14 @@
     function pickVoice(lang) {
         if (!voices.length) loadVoices();
         const base = lang.split('-')[0];
-        return voices.find((v) => v.lang && v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase())
-            || voices.find((v) => v.lang && v.lang.toLowerCase().startsWith(base))
-            || null;
+        const exact = voices.filter((v) => v.lang && v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase());
+        const anyBase = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith(base));
+        const pool = exact.length ? exact : anyBase;
+        if (!pool.length) return null;
+        // Prefer a female teacher voice: the lesson narration should sound like
+        // أستاذة, so a known female voice name wins over an arbitrary match.
+        const female = pool.find((v) => FEMALE_VOICE_HINTS.some((h) => (v.name || '').toLowerCase().includes(h)));
+        return female || pool[0];
     }
 
     // Some devices (notably without an Arabic TTS voice installed) cannot read
@@ -1061,7 +1072,8 @@
     async function openLessonAdmin(bookId, card) {
         busy(true);
         const out = card.querySelector('.book-out');
-        const d = await API.get(`/textbooks/${bookId}/lessons`, { auth: false });
+        // Content admins manage every lesson, including archived drafts.
+        const d = await API.get(`/textbooks/${bookId}/lessons?all=1`, { auth: false });
         out.innerHTML = `<div class="lesson-admin">
             <div class="ask-row"><input id="nlTitle" placeholder="عنوان درس جديد"><button class="btn small primary" id="nlAdd">إضافة درس</button></div>
             <ul class="lesson-list">${d.lessons.map((l) => `<li class="lesson-item"><span class="lesson-title">${esc(l.title)}</span>
