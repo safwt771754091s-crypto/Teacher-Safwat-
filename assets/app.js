@@ -287,12 +287,14 @@
 
         <h3>نقاط الدرس من الكتاب</h3>
         <ul class="points">
-            ${sections.map((s) => `<li class="pt pt-${s.type}">
+            ${sections.filter((s) => !s.visual).map((s) => `<li class="pt pt-${s.type}">
                 ${s.title ? `<strong>${esc(s.title)}</strong>` : ''}
                 <span>${esc(s.content)}</span>
                 ${s.source_page ? `<span class="page-tag">ص ${s.source_page}</span>` : ''}
             </li>`).join('') || '<li class="muted">لا توجد نقاط بعد.</li>'}
         </ul>
+
+        ${renderInteractiveModels(sections)}
 
         <h3>التمارين (${exercises.length})</h3>
         <div id="exerciseArea">${exercises.map(renderExercise).join('') || '<p class="muted">لا توجد تمارين.</p>'}</div>
@@ -340,6 +342,7 @@
         el('micBtn').onclick = () => startVoiceAsk(id);
 
         bindExercises(exercises);
+        mountInteractiveModels(sections);
         trackTime(id);
         busy(false);
     }
@@ -361,6 +364,36 @@
             <ul class="points">${r.explanation.map((x) => `<li class="pt">${esc(x)}</li>`).join('')}</ul>
             ${r.pages && r.pages.length ? `<div class="muted small">المصدر: صفحات ${r.pages.join('، ')} من الكتاب</div>` : ''}
             ${r.needs_content ? '<div class="warn">لم يُعتمد محتوى هذا الدرس بعد.</div>' : ''}`;
+    }
+
+    // Interactive models attached to a lesson's sections (visual JSON from the
+    // API). Rendered client-side by interactive.js; kept as a placeholder div
+    // here so the markup stays declarative and the model mounts after paint.
+    function renderInteractiveModels(sections) {
+        const withVisual = sections.filter((s) => s.visual && s.visual.kind);
+        if (!withVisual.length) return '';
+        return `<h3>النماذج التفاعلية 🧪</h3>
+            <p class="muted small">جرّب بنفسك: اسحب، حرّك المؤشر، وغيّر القيم لتشاهد كيف يتغيّر الشكل — ثم اضغط «اشرحي لي هذا الشكل» لتسمع شرح الأستاذة.</p>
+            ${withVisual.map((s, i) => `<div class="card im-card">
+                ${s.title ? `<h4>${esc(s.title)}</h4>` : ''}
+                ${s.content ? `<p class="muted small">${esc(s.content)}</p>` : ''}
+                <div class="im-host" data-visual="${i}"></div>
+            </div>`).join('')}`;
+    }
+
+    // Mount every model on the current lesson view. Called once after the lesson
+    // HTML is injected; models own their own canvas and listeners.
+    function mountInteractiveModels(sections) {
+        const withVisual = sections.filter((s) => s.visual && s.visual.kind);
+        if (!withVisual.length || !window.Interactive) return;
+        view.querySelectorAll('.im-host').forEach((host) => {
+            const spec = withVisual[parseInt(host.dataset.visual, 10)].visual;
+            try {
+                window.Interactive.render(host, spec, {});
+            } catch (e) {
+                host.innerHTML = `<p class="muted small">تعذّر عرض النموذج.</p>`;
+            }
+        });
     }
 
     function renderExercise(ex) {
@@ -1146,24 +1179,58 @@
     // ---------------- Manual lesson authoring (sections & exercises) ----------------
     const SECTION_TYPES = [['heading', 'عنوان'], ['point', 'نقطة'], ['definition', 'تعريف'], ['example', 'مثال'], ['note', 'ملاحظة'], ['vocab', 'مفردات']];
 
+    // Interactive model kinds offered to teachers. Keys must exist in
+    // web/assets/interactive.js; `params` are the sensible starting values so a
+    // teacher can attach a working figure without writing JSON by hand.
+    const VISUAL_KINDS = [
+        ['', 'بدون نموذج (نص فقط)'],
+        ['complex-plane', 'المستوى المركّب'],
+        ['function-graph', 'منحنى دالة ومماس'],
+        ['area-under-curve', 'مساحة تحت المنحنى'],
+        ['conic', 'قطوع مخروطية'],
+        ['pascal', 'مثلث باسكال'],
+        ['probability-tree', 'شجرة الاحتمالات'],
+        ['unit-circle', 'الدائرة الوحدة'],
+        ['vector-space', 'متجهات في الفضاء'],
+        ['number-line', 'مستقيم الأعداد'],
+    ];
+    const VISUAL_DEFAULTS = {
+        'complex-plane': { re: 3, im: 4, range: 6 },
+        'function-graph': { fn: 'x^2', at: 1 },
+        'area-under-curve': { fn: 'x^2', a: 0, b: 2, n: 4 },
+        conic: { conic: 'parabola', a: 2 },
+        pascal: { n: 4 },
+        'probability-tree': { p1: 0.6, p2: 0.5 },
+        'unit-circle': { deg: 30 },
+        'vector-space': { x: 2, y: 3, z: 1.5 },
+        'number-line': { a: -2, b: 3, lo: -6, hi: 6 },
+    };
+
     function openSectionForm(lessonId, card) {
         el('modalBody').innerHTML = `<h3>إضافة قسم للدرس</h3>
             <label>النوع<select id="secType">${SECTION_TYPES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>
             <label>العنوان (اختياري)<input id="secTitle"></label>
             <label>المحتوى<textarea id="secContent" rows="4"></textarea></label>
+            <label>نموذج تفاعلي (اختياري)<select id="secVisual">${VISUAL_KINDS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>
+            <label id="secPromptWrap" class="hidden">تعليق النموذج (اختياري)<input id="secPrompt"></label>
             <label>رقم الصفحة في الكتاب (اختياري)<input id="secPage" type="number" min="1"></label>
             <button class="btn primary" id="secSave">حفظ القسم</button>`;
         el('modal').classList.remove('hidden');
+        el('secVisual').onchange = () => {
+            el('secPromptWrap').classList.toggle('hidden', !el('secVisual').value);
+        };
         el('secSave').onclick = async () => {
             const content = el('secContent').value.trim();
-            if (!content) { toast('أدخل محتوى القسم', 'error'); return; }
+            const kind = el('secVisual').value;
+            if (!content && !kind) { toast('أدخل محتوى القسم أو اختر نموذجًا تفاعليًا', 'error'); return; }
             busy(true);
             try {
                 await API.post(`/lessons/${lessonId}/sections`, {
                     type: el('secType').value,
                     title: el('secTitle').value.trim() || null,
-                    content,
+                    content: content || 'نموذج تفاعلي',
                     source_page: el('secPage').value ? Number(el('secPage').value) : null,
+                    visual: kind ? { kind, params: VISUAL_DEFAULTS[kind] || {}, prompt: el('secPrompt').value.trim() || undefined } : null,
                 });
                 toast('تمت إضافة القسم');
                 el('modal').classList.add('hidden');
