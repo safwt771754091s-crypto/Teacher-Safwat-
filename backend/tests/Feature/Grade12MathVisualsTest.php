@@ -39,6 +39,12 @@ class Grade12MathVisualsTest extends TestCase
         'solid-3d', 'solid-of-revolution', 'vector-3d', 'surface-3d',
     ];
 
+    /** Kinds implemented by web/assets/interactive-lessons.js (DOM models). */
+    private const CLIENT_LESSON_KINDS = [
+        'letter-card', 'counting', 'sequence', 'sort-bins',
+        'family-tree', 'sentence-builder', 'clock',
+    ];
+
     private function mathsBook(): Textbook
     {
         $grade = Grade::where('level', 12)->firstOrFail();
@@ -66,10 +72,12 @@ class Grade12MathVisualsTest extends TestCase
 
     public function test_model_kinds_are_supported_by_the_client_engine(): void
     {
+        $all = array_merge(self::CLIENT_KINDS, self::CLIENT_3D_KINDS, self::CLIENT_LESSON_KINDS);
+
         foreach (LessonSection::whereNotNull('visual')->get() as $section) {
             $this->assertContains(
                 $section->visual['kind'] ?? null,
-                array_merge(self::CLIENT_KINDS, self::CLIENT_3D_KINDS),
+                $all,
                 "Model kind «{$section->visual['kind']}» is not implemented by the client engines.",
             );
         }
