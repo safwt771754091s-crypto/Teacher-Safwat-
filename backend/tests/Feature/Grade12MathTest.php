@@ -113,7 +113,11 @@ class Grade12MathTest extends TestCase
         $res = $this->getJson("/api/v1/lessons/{$lesson->id}")->assertOk();
         $this->assertNotEmpty($res->json('lesson.sections'));
         foreach ($res->json('lesson.sections') as $section) {
-            $this->assertNotNull($section['source_page']);
+            // Only verbatim book text must cite its page; interactive models the
+            // platform authored (is_from_textbook = false) have no book page.
+            if ($section['is_from_textbook']) {
+                $this->assertNotNull($section['source_page']);
+            }
         }
     }
 

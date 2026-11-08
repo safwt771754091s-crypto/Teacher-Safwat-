@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Attempt;
 use App\Models\Exercise;
 use App\Models\Lesson;
 use App\Models\Subject;
@@ -20,8 +21,7 @@ class TeacherController extends Controller
     public function __construct(
         private ContentExtractionService $extractor,
         private AiTeacherService $ai,
-    ) {
-    }
+    ) {}
 
     /**
      * Create a textbook record, then upload a PDF or page images to extract from.
@@ -37,6 +37,7 @@ class TeacherController extends Controller
         ]);
 
         $textbook = Textbook::create($data + ['status' => 'draft']);
+
         return response()->json(['textbook' => $textbook], 201);
     }
 
@@ -56,6 +57,7 @@ class TeacherController extends Controller
         ]);
 
         $textbook->update($data);
+
         return response()->json(['textbook' => $textbook]);
     }
 
@@ -128,18 +130,21 @@ class TeacherController extends Controller
             'review_note' => ['nullable', 'string'],
         ]);
         $page->update($data + ['status' => $data['status'] ?? 'reviewed']);
+
         return response()->json(['page' => $page]);
     }
 
     public function draftLessons(Textbook $textbook)
     {
         $count = $this->extractor->draftLessonsFromPages($textbook);
+
         return response()->json(['lessons_created' => $count]);
     }
 
     public function publishTextbook(Textbook $textbook)
     {
         $textbook->update(['status' => 'published']);
+
         return response()->json(['textbook' => $textbook]);
     }
 
@@ -152,6 +157,7 @@ class TeacherController extends Controller
             'sort_order' => ['nullable', 'integer'],
         ]);
         $lesson = $textbook->lessons()->create($data + ['status' => 'draft']);
+
         return response()->json(['lesson' => $lesson], 201);
     }
 
@@ -163,8 +169,15 @@ class TeacherController extends Controller
             'content' => ['required', 'string'],
             'source_page' => ['nullable', 'integer'],
             'sort_order' => ['nullable', 'integer'],
+            // Optional interactive model (see web/assets/interactive.js). Only the
+            // descriptor is validated here; the client owns how each kind draws.
+            'visual' => ['nullable', 'array'],
+            'visual.kind' => ['required_with:visual', 'string', 'max:40'],
+            'visual.params' => ['nullable', 'array'],
+            'visual.prompt' => ['nullable', 'string', 'max:500'],
         ]);
-        $section = $lesson->sections()->create($data + ['is_from_textbook' => true]);
+        $section = $lesson->sections()->create($data + ['is_from_textbook' => false]);
+
         return response()->json(['section' => $section], 201);
     }
 
@@ -281,6 +294,7 @@ class TeacherController extends Controller
             'approved_at' => now(),
         ]);
         $summary->lesson?->update(['status' => 'published']);
+
         return response()->json(['summary' => $summary]);
     }
 
@@ -289,12 +303,13 @@ class TeacherController extends Controller
      */
     public function strugglingLessons()
     {
-        $rows = \App\Models\Attempt::where('is_correct', false)
+        $rows = Attempt::where('is_correct', false)
             ->with('exercise.lesson')
             ->get()
             ->groupBy(fn ($a) => $a->exercise?->lesson_id)
             ->map(function ($attempts) {
                 $lesson = $attempts->first()->exercise?->lesson;
+
                 return [
                     'lesson' => $lesson?->only(['id', 'title']),
                     'wrong_attempts' => $attempts->count(),
@@ -322,6 +337,7 @@ class TeacherController extends Controller
         ]);
         $user = User::findOrFail($data['teacher_user_id']);
         $assignment = $user->teacherAssignments()->create($data);
+
         return response()->json(['assignment' => $assignment], 201);
     }
 }
