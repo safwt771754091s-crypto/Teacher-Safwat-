@@ -14,10 +14,7 @@
 (function () {
     // Origin of the deployed API. Leave empty until the API host is known; the
     // app then falls back to the meta tag / paired host / localhost.
-    // NOTE: the previous Render service (yemeni-smart-teacher-api.onrender.com)
-    // is not responding, so the published site points at the running API host.
-    // Replace with a permanent Render/Railway/Fly service URL when available.
-    var PROD_API_ORIGIN = "https://work-1-mmsqrpygezpqrdne.prod-runtime.all-hands.dev";
+    var PROD_API_ORIGIN = "https://yemeni-smart-teacher-api.onrender.com";
 
     function withApi(origin) {
         return String(origin).replace(/\/+$/, "") + "/api/v1";
