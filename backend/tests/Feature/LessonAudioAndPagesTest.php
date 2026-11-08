@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\AudioAsset;
 use App\Models\Lesson;
+use App\Services\AudioService;
 use App\Services\ContentExtractionService;
 use App\Services\TextbookExportService;
 use App\Services\TtsService;
@@ -52,6 +54,16 @@ class LessonAudioAndPagesTest extends TestCase
         config(['platform.tts.enabled' => false]);
 
         $this->get('/api/v1/tts?text=' . rawurlencode('نص'))->assertNotFound();
+    }
+
+    public function test_narration_uses_a_female_teacher_voice(): void
+    {
+        // The lesson narration must sound like a professional Arabic female
+        // teacher (أستاذة); the default voice id records that choice.
+        $lesson = Lesson::where('status', 'published')->firstOrFail();
+        $narration = app(AudioService::class)->lessonNarration($lesson);
+
+        $this->assertSame('ar-teacher-female', AudioAsset::find($narration['asset_id'])->voice);
     }
 
     public function test_tts_chunking_keeps_each_part_under_the_limit(): void

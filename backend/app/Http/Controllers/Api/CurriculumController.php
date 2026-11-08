@@ -25,7 +25,10 @@ class CurriculumController extends Controller
 
     public function textbooks(Subject $subject, Request $request)
     {
-        $query = $subject->textbooks()->withCount('lessons');
+        // Learners see how many *published* lessons a book actually has, so the
+        // card count matches the lesson list they get.
+        $query = $subject->textbooks()
+            ->withCount(['lessons as lessons_count' => fn ($q) => $q->where('status', 'published')]);
         // Hide catalogue-only rows (no lessons/pages) from learners so an empty
         // placeholder never leads to a dead book view; admins pass ?all=1 to
         // still see and manage them.
@@ -41,9 +44,16 @@ class CurriculumController extends Controller
         ]);
     }
 
-    public function lessons(Textbook $textbook)
+    public function lessons(Textbook $textbook, Request $request)
     {
-        $lessons = $textbook->lessons()->get(['id', 'title', 'page_from', 'page_to', 'sort_order', 'status']);
+        // Learners only ever see published lessons. Archived/structural rows
+        // (status = draft) stay in the database but are hidden from the book
+        // view; content admins pass ?all=1 to see and manage every row.
+        $query = $textbook->lessons();
+        if (! $request->boolean('all')) {
+            $query->where('status', 'published');
+        }
+        $lessons = $query->get(['id', 'title', 'page_from', 'page_to', 'sort_order', 'status']);
         return response()->json([
             'textbook' => $textbook->only(['id', 'title', 'term', 'status', 'pages_count', 'authority', 'branch']),
             'lessons' => $lessons,
