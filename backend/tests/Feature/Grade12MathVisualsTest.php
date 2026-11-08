@@ -7,7 +7,9 @@ use App\Models\Lesson;
 use App\Models\LessonSection;
 use App\Models\Subject;
 use App\Models\Textbook;
+use App\Models\User;
 use Database\Seeders\Grade12MathVisualsSeeder;
+use Database\Seeders\UsersAndGamesSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -26,10 +28,15 @@ class Grade12MathVisualsTest extends TestCase
 
     protected bool $seed = true;
 
-    /** Kinds that web/assets/interactive.js implements. */
+    /** Kinds implemented by web/assets/interactive.js (2-D). */
     private const CLIENT_KINDS = [
         'complex-plane', 'function-graph', 'area-under-curve', 'conic',
         'pascal', 'probability-tree', 'unit-circle', 'vector-space', 'number-line',
+    ];
+
+    /** Kinds implemented by web/assets/interactive3d.js (3-D). */
+    private const CLIENT_3D_KINDS = [
+        'solid-3d', 'solid-of-revolution', 'vector-3d', 'surface-3d',
     ];
 
     private function mathsBook(): Textbook
@@ -62,9 +69,40 @@ class Grade12MathVisualsTest extends TestCase
         foreach (LessonSection::whereNotNull('visual')->get() as $section) {
             $this->assertContains(
                 $section->visual['kind'] ?? null,
-                self::CLIENT_KINDS,
-                "Model kind «{$section->visual['kind']}» is not implemented in interactive.js.",
+                array_merge(self::CLIENT_KINDS, self::CLIENT_3D_KINDS),
+                "Model kind «{$section->visual['kind']}» is not implemented by the client engines.",
             );
+        }
+    }
+
+    public function test_the_3d_engine_actually_implements_every_3d_kind_it_is_credited_with(): void
+    {
+        $js = file_get_contents(base_path('../web/assets/interactive3d.js'));
+
+        $this->assertNotFalse($js, 'interactive3d.js should exist.');
+        foreach (self::CLIENT_3D_KINDS as $kind) {
+            $this->assertStringContainsString(
+                "KINDS['{$kind}']",
+                $js,
+                "interactive3d.js does not implement the «{$kind}» model.",
+            );
+        }
+        // The 2-D engine must expose a registration hook for the 3-D one.
+        $this->assertStringContainsString('register:', file_get_contents(base_path('../web/assets/interactive.js')));
+    }
+
+    public function test_the_grade_12_book_teaches_solid_geometry_in_three_dimensions(): void
+    {
+        $book = $this->mathsBook();
+        $kinds = LessonSection::whereIn('lesson_id', Lesson::where('textbook_id', $book->id)->pluck('id'))
+            ->whereNotNull('visual')
+            ->get()
+            ->map(fn ($s) => $s->visual['kind'] ?? null)
+            ->filter(fn ($k) => in_array($k, self::CLIENT_3D_KINDS, true));
+
+        $this->assertGreaterThanOrEqual(4, $kinds->count(), 'The book should use several 3-D models.');
+        foreach (self::CLIENT_3D_KINDS as $kind) {
+            $this->assertTrue($kinds->contains($kind), "No lesson uses the «{$kind}» 3-D model.");
         }
     }
 
@@ -103,7 +141,7 @@ class Grade12MathVisualsTest extends TestCase
 
     public function test_a_teacher_can_attach_a_model_to_a_section(): void
     {
-        $teacher = \App\Models\User::where('role', 'teacher')->firstOrFail();
+        $teacher = User::where('role', 'teacher')->firstOrFail();
         $lesson = Lesson::where('status', 'published')->firstOrFail();
 
         $res = $this->actingAs($teacher)->postJson("/api/v1/lessons/{$lesson->id}/sections", [
@@ -121,7 +159,7 @@ class Grade12MathVisualsTest extends TestCase
 
     public function test_a_section_with_an_unknown_model_shape_is_rejected(): void
     {
-        $teacher = \App\Models\User::where('role', 'teacher')->firstOrFail();
+        $teacher = User::where('role', 'teacher')->firstOrFail();
         $lesson = Lesson::where('status', 'published')->firstOrFail();
 
         $this->actingAs($teacher)->postJson("/api/v1/lessons/{$lesson->id}/sections", [
@@ -133,10 +171,10 @@ class Grade12MathVisualsTest extends TestCase
 
     public function test_demo_accounts_are_restored_when_the_database_is_emptied(): void
     {
-        \App\Models\User::query()->delete();
+        User::query()->delete();
 
         config(['platform.seed_demo_users' => true]);
-        $this->seed(\Database\Seeders\UsersAndGamesSeeder::class);
+        $this->seed(UsersAndGamesSeeder::class);
 
         $this->assertDatabaseHas('users', ['email' => 'student@school.ye', 'role' => 'student']);
         $this->assertDatabaseHas('users', ['email' => 'teacher@school.ye', 'role' => 'teacher']);
