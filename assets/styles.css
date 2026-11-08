@@ -311,3 +311,50 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 @media (max-width: 480px) {
     .install-bar { flex-direction: column; text-align: center; }
 }
+
+/* ---- interactive lesson models (letters, counting, sorting, sentences) ---- */
+.im-letter { text-align: center; padding: 18px 10px; }
+.im-letter-glyph { font-size: 4rem; line-height: 1.2; font-weight: 700; color: var(--green-dark, #24513a); }
+.im-letter-sound { font-size: 1.4rem; color: var(--muted, #6b7280); margin-top: 4px; }
+.im-letter-word { font-size: 1.6rem; margin-top: 10px; color: var(--ink, #1f2937); }
+.im-count-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; padding: 12px 0; }
+.im-count-cell {
+    font-size: 1.9rem; line-height: 1; width: 58px; height: 58px;
+    border: 2px dashed var(--line, #e5e7eb); border-radius: 14px;
+    background: #fff; cursor: pointer; transition: transform .12s, background .12s;
+}
+.im-count-cell.on { background: #ecfdf5; border-style: solid; border-color: var(--green, #2f6a43); transform: scale(1.06); }
+.im-seq { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.im-seq-item {
+    text-align: right; padding: 10px 14px; border-radius: 12px;
+    border: 1px solid var(--line, #e5e7eb); background: #fff;
+    font-size: 1rem; cursor: pointer; font-family: inherit;
+}
+.im-seq-item.picked { border-color: var(--green, #2f6a43); background: #ecfdf5; }
+.im-pool { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0; }
+.im-chip {
+    padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, #e5e7eb);
+    background: #fff; cursor: pointer; font-family: inherit; font-size: 1rem;
+}
+.im-chip.picked { border-color: var(--green, #2f6a43); background: #ecfdf5; }
+.im-chip.placed { background: #f1f5f9; cursor: default; }
+.im-chip.used { opacity: .35; }
+.im-bins { display: flex; flex-wrap: wrap; gap: 10px; }
+.im-bin { flex: 1 1 130px; border: 1px solid var(--line, #e5e7eb); border-radius: 14px; padding: 8px; min-height: 90px; cursor: pointer; }
+.im-bin-title { font-weight: 700; font-size: .9rem; color: var(--green-dark, #24513a); margin-bottom: 6px; text-align: center; }
+.im-bin-body { display: flex; flex-wrap: wrap; gap: 6px; }
+.im-tree { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 10px 0; }
+.im-tree-node {
+    width: 96px; padding: 10px 6px; border-radius: 14px; text-align: center;
+    border: 1px solid var(--line, #e5e7eb); background: #fff; cursor: pointer;
+}
+.im-tree-glyph { font-size: 1.8rem; }
+.im-tree-label { font-weight: 700; margin-top: 4px; }
+.im-tree-rel { font-size: .8rem; color: var(--muted, #6b7280); }
+.im-sentence {
+    min-height: 52px; padding: 10px; border-radius: 12px; margin-bottom: 10px;
+    border: 2px dashed var(--line, #e5e7eb); background: #fafafa;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
+.im-wordbank { display: flex; flex-wrap: wrap; gap: 8px; }
+.im-model .im-readout { margin-top: 10px; }
