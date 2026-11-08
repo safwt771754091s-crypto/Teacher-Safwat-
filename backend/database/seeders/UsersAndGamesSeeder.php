@@ -12,6 +12,8 @@ use App\Models\StudentProfile;
 use App\Models\Subject;
 use App\Models\TeacherAssignment;
 use App\Models\User;
+use App\Services\MathQuestionBank;
+use App\Support\DemoAccounts;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -19,6 +21,10 @@ class UsersAndGamesSeeder extends Seeder
 {
     public function run(): void
     {
+        // Demo accounts keep a fresh or ephemeral deployment usable, so they
+        // are created when there is no real account to log in with. On a
+        // populated production database they are skipped.
+        $seedDemo = DemoAccounts::enabled() && User::query()->count() === 0;
         foreach ([
             ['name' => 'مالك المنصة', 'slug' => 'owner'],
             ['name' => 'مشرف المحتوى', 'slug' => 'admin'],
@@ -38,7 +44,7 @@ class UsersAndGamesSeeder extends Seeder
         // owner is created through `php artisan platform:bootstrap-owner`
         // (using an environment secret), and real accounts come from
         // registration, so we never ship a default password.
-        if ($this->demoUsersEnabled()) {
+        if ($seedDemo) {
             $this->seedDemoUsers($grade1, $grade2, $mathSubject);
         }
 
@@ -47,12 +53,12 @@ class UsersAndGamesSeeder extends Seeder
     }
 
     /**
-     * Whether to create the shared demo accounts. Enabled everywhere except
-     * production, and can be forced with the SEED_DEMO_USERS env flag.
+     * Whether to create the shared demo accounts. The decision lives in
+     * App\Support\DemoAccounts so it can be unit-tested.
      */
     private function demoUsersEnabled(): bool
     {
-        return (bool) config('platform.seed_demo_users');
+        return DemoAccounts::enabled();
     }
 
     private function seedDemoUsers(?Grade $grade1, ?Grade $grade2, ?Subject $mathSubject): void
@@ -114,7 +120,7 @@ class UsersAndGamesSeeder extends Seeder
 
         // Procedural math questions from the curriculum reference so every math
         // game ships with a large, varied, self-answered question set.
-        $bank = app(\App\Services\MathQuestionBank::class);
+        $bank = app(MathQuestionBank::class);
         $band = $bank->bandForGrade($grade1?->level ?? 1);
 
         // Each named game serves the question type its title promises (fast

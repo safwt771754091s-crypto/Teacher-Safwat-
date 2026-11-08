@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\DemoAccounts;
+
 return [
     'name' => 'معلمي الذكي اليمني',
 
@@ -19,10 +21,17 @@ return [
     | Demo data
     |--------------------------------------------------------------------------
     | Shared demo accounts (student/teacher/parent/owner with the password
-    | "password") are a development convenience. They are never created in
-    | production; set SEED_DEMO_USERS=true to force them on (e.g. a demo host).
+    | "password") keep the platform usable the moment it boots - a login screen
+    | nobody can pass is not a working deployment. See App\Support\DemoAccounts
+    | for the decision: always in development, and in production only when the
+    | database cannot keep data (SQLite on an ephemeral host). Set
+    | SEED_DEMO_USERS explicitly to override.
     */
-    'seed_demo_users' => (bool) env('SEED_DEMO_USERS', env('APP_ENV', 'production') !== 'production'),
+    'seed_demo_users' => DemoAccounts::shouldSeed(
+        env('APP_ENV', 'production'),
+        env('DB_CONNECTION', 'sqlite'),
+        env('SEED_DEMO_USERS') === null ? null : (bool) env('SEED_DEMO_USERS'),
+    ),
 
     /*
     |--------------------------------------------------------------------------

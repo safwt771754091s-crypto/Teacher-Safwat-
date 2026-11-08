@@ -130,4 +130,15 @@ class Grade12MathVisualsTest extends TestCase
             'visual' => ['params' => ['n' => 3]], // no kind
         ])->assertStatus(422);
     }
+
+    public function test_demo_accounts_are_restored_when_the_database_is_emptied(): void
+    {
+        \App\Models\User::query()->delete();
+
+        config(['platform.seed_demo_users' => true]);
+        $this->seed(\Database\Seeders\UsersAndGamesSeeder::class);
+
+        $this->assertDatabaseHas('users', ['email' => 'student@school.ye', 'role' => 'student']);
+        $this->assertDatabaseHas('users', ['email' => 'teacher@school.ye', 'role' => 'teacher']);
+    }
 }

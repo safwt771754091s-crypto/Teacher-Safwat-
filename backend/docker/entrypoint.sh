@@ -50,6 +50,12 @@ else
     php artisan db:seed --force || echo "WARNING: seeding failed; continuing." >&2
 fi
 
+# A fresh or reset database has no accounts, so nobody can log in. The seeder
+# only creates the shared demo accounts when the users table is empty (and the
+# database cannot keep data), so re-running it here restores a usable login
+# without ever overwriting a real, populated database.
+php artisan db:seed --class=UsersAndGamesSeeder --force >/dev/null 2>&1 || true
+
 # Attach each book's source PDF from the bundled manifests so the in-app page
 # viewer can render the real textbook pages. The seeder creates the catalogue
 # with firstOrCreate (which never updates existing rows), so on an
