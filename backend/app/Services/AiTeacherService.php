@@ -21,6 +21,8 @@ use Illuminate\Support\Facades\Http;
  */
 class AiTeacherService
 {
+    use Concerns\SendsLlmRequests;
+
     public function __construct(
         private ContentExtractionService $extractor,
         private NumericVerifier $numbers,
@@ -109,7 +111,7 @@ class AiTeacherService
         $provider = config('platform.ai.provider', 'none');
         $apiKey = config('platform.ai.api_key');
 
-        if ($provider === 'none' || empty($apiKey)) {
+        if (! $this->llmReady()) {
             // Offline grounded mode: compose the explanation directly from the
             // approved source, so the output is exactly the textbook content
             // simplified only by selection and ordering, never invented.
@@ -188,16 +190,14 @@ class AiTeacherService
     private function callLlm(string $provider, string $apiKey, string $system, string $userMsg, ?User $user, Lesson $lesson, string $feature): ?string
     {
         try {
-            $response = Http::withToken($apiKey)
-                ->timeout(config('platform.ai.timeout', 30))
-                ->post(rtrim(config('platform.ai.base_url'), '/') . '/chat/completions', [
-                    'model' => config('platform.ai.model'),
-                    'messages' => [
-                        ['role' => 'system', 'content' => $system],
-                        ['role' => 'user', 'content' => $userMsg],
-                    ],
-                    'temperature' => 0.2,
-                ]);
+            $response = $this->postChat([
+                'model' => config('platform.ai.model'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => $userMsg],
+                ],
+                'temperature' => 0.2,
+            ], $apiKey);
 
             $this->logUsage($user, $lesson, $provider, $response, $feature);
 
@@ -282,7 +282,7 @@ class AiTeacherService
         $provider = config('platform.ai.provider', 'none');
         $apiKey = config('platform.ai.api_key');
 
-        if ($provider === 'none' || empty($apiKey)) {
+        if (! $this->llmReady()) {
             $structured = $this->sourceStructuredSteps($exercise, $ctx);
             if ($structured !== null) {
                 return $structured;
@@ -433,7 +433,7 @@ class AiTeacherService
             }
         }
 
-        if ($provider !== 'none' && ! empty($apiKey) && ! $needsContent) {
+        if ($this->llmReady() && ! $needsContent) {
             $system = "أنت معلم يمني خبير. اقترح حلًا مرجعيًا لتمرين من كتاب المنهج اليمني، اعتمادًا على (محتوى الدرس) المرفق فقط.\n"
                 . "لا تخترع أي معلومة من خارج المحتوى المرفق.\n"
                 . 'أعد الناتج بصيغة JSON فقط بالمفاتيح: {"answer": "...", "steps": ["...", "..."], "hint": "..."}. '
@@ -473,7 +473,7 @@ class AiTeacherService
             'solution_steps' => $steps,
             'hint' => $hint,
             'needs_content' => $needsContent,
-            'provider' => $provider === 'none' || empty($apiKey) ? 'source' : $provider,
+            'provider' => $this->llmReady() ? $provider : 'source',
             'confidence' => $confidence,
         ];
     }

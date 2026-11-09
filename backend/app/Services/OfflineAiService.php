@@ -18,15 +18,17 @@ use Illuminate\Support\Facades\Http;
  */
 class OfflineAiService
 {
+    use Concerns\SendsLlmRequests;
+
     public function provider(): string
     {
         return (string) config('platform.ai.provider', 'none');
     }
 
-    /** True only when a cloud provider is configured with a key. */
+    /** True when a provider is configured with a key, or needs none. */
     public function available(): bool
     {
-        return $this->provider() !== 'none' && ! empty(config('platform.ai.api_key'));
+        return $this->llmReady();
     }
 
     /**
@@ -48,16 +50,14 @@ class OfflineAiService
         $apiKey = (string) config('platform.ai.api_key');
 
         try {
-            $response = Http::withToken($apiKey)
-                ->timeout((int) config('platform.ai.timeout', 30))
-                ->post(rtrim((string) config('platform.ai.base_url'), '/').'/chat/completions', [
-                    'model' => config('platform.ai.model'),
-                    'messages' => [
-                        ['role' => 'system', 'content' => $system],
-                        ['role' => 'user', 'content' => $userMessage],
-                    ],
-                    'temperature' => 0.2,
-                ]);
+            $response = $this->postChat([
+                'model' => config('platform.ai.model'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $system],
+                    ['role' => 'user', 'content' => $userMessage],
+                ],
+                'temperature' => 0.2,
+            ], $apiKey);
 
             if (! $response->successful()) {
                 $this->log($user, $subject, $feature, $response, false, 'HTTP '.$response->status());

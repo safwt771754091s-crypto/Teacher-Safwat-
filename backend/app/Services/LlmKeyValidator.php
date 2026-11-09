@@ -22,7 +22,10 @@ class LlmKeyValidator
     public function check(string $apiKey, ?string $provider = null, ?string $model = null, ?string $baseUrl = null): array
     {
         $apiKey = trim($apiKey);
-        if ($apiKey === '') {
+        $provider = $provider ?: (string) (Setting::get('llm_provider') ?: config('platform.ai.provider', 'openai'));
+        $keyless = in_array($provider, (array) config('platform.ai.keyless', []), true);
+
+        if ($apiKey === '' && ! $keyless) {
             return ['ok' => false, 'message' => 'المفتاح فارغ.'];
         }
 

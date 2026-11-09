@@ -1425,6 +1425,7 @@
             <label class="muted small">١ — المزوّد</label>
             <div class="ask-row">
                 <select id="aiProvider">
+                    <option value="pollinations">مجاني بلا مفتاح (يعمل فورًا)</option>
                     <option value="openai">OpenAI (مدفوع)</option>
                     <option value="openrouter">OpenRouter (فيه نماذج مجانية)</option>
                     <option value="groq">Groq (فيه نماذج مجانية)</option>
@@ -1440,7 +1441,7 @@
             <div class="ask-row">
                 <input id="aiModel" placeholder="مثال: gpt-4o-mini" autocomplete="off">
             </div>
-            <label class="muted small">٣ — مفتاح المزوّد (الصقه هنا فقط)</label>
+            <label class="muted small">٣ — مفتاح المزوّد (الصقه هنا فقط — يُترك فارغًا مع المزوّد المجاني)</label>
             <div class="ask-row">
                 <input id="aiKey" type="password" placeholder="sk-… أو key_…" autocomplete="off">
                 <button class="btn primary" id="aiSave">حفظ واختبار</button>
@@ -1485,7 +1486,7 @@
 
     // The owner pastes the model key here; the server proves it before storing.
     const AI_DEFAULT_MODEL = {
-        openai: 'gpt-4o-mini', openrouter: 'google/gemma-4-31b-it:free', groq: 'llama-3.3-70b-versatile',
+        pollinations: 'openai', openai: 'gpt-4o-mini', openrouter: 'google/gemma-4-31b-it:free', groq: 'llama-3.3-70b-versatile',
         gemini: 'gemini-2.0-flash', deepseek: 'deepseek-chat', mistral: 'mistral-small-latest',
         together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', xai: 'grok-2-latest',
     };
@@ -1510,9 +1511,13 @@
         } catch (e) { /* the rest of the console still works */ }
     }
 
+    // These answer without a key, so the owner can start free with no signup.
+    const AI_KEYLESS = ['pollinations'];
+
     async function saveAiSettings() {
         const msg = el('aiMsg');
         const provider = el('aiProvider').value;
+        const keyless = AI_KEYLESS.indexOf(provider) !== -1;
         let model = el('aiModel').value.trim();
         const key = el('aiKey').value.trim();
         if (provider === 'none') {
@@ -1528,13 +1533,15 @@
             return;
         }
         if (!model) model = AI_DEFAULT_MODEL[provider] || 'gpt-4o-mini';
-        if (!key) { msg.textContent = '❌ ألصق المفتاح في الحقل الثالث (٣).'; return; }
+        if (!key && !keyless) { msg.textContent = '❌ ألصق المفتاح في الحقل الثالث (٣).'; return; }
         msg.textContent = 'جارٍ الحفظ والتحقّق من المفتاح…';
         try {
             await API.post('/owner/settings', { key: 'llm_provider', value: provider });
             await API.post('/owner/settings', { key: 'llm_model', value: model });
-            await API.post('/owner/settings', { key: 'llm_api_key', value: key });
-            msg.textContent = '✅ حُفظ المفتاح وهو صالح ويعمل. النموذج: ' + model;
+            if (key) await API.post('/owner/settings', { key: 'llm_api_key', value: key });
+            msg.textContent = keyless
+                ? '✅ شُغّل المعلم الذكي بالمزوّد المجاني (بلا مفتاح). النموذج: ' + model
+                : '✅ حُفظ المفتاح وهو صالح ويعمل. النموذج: ' + model;
             el('aiKey').value = '';
         } catch (e) {
             msg.textContent = '❌ ' + e.message;

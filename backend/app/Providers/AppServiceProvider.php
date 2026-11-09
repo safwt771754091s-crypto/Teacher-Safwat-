@@ -60,6 +60,13 @@ class AppServiceProvider extends ServiceProvider
                 if (isset($endpoints[$provider]) && ! env('LLM_BASE_URL')) {
                     config(['platform.ai.base_url' => $endpoints[$provider]]);
                 }
+
+                // A keyless provider needs no key, so make sure it has a usable
+                // model even when the owner left the field empty.
+                $models = (array) config('platform.ai.models', []);
+                if (! $model && isset($models[$provider]) && ! env('LLM_MODEL')) {
+                    config(['platform.ai.model' => $models[$provider]]);
+                }
             }
             if ($baseUrl && ! env('LLM_BASE_URL')) {
                 config(['platform.ai.base_url' => $baseUrl]);

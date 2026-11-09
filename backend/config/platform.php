@@ -69,6 +69,8 @@ return [
         'model' => env('LLM_MODEL', 'gpt-4o-mini'),
         'base_url' => env('LLM_BASE_URL', 'https://api.openai.com/v1'),
         'timeout' => (int) env('LLM_TIMEOUT', 30),
+        // Free tiers answer at a limited rate; retry rather than fail the run.
+        'retries' => (int) env('LLM_RETRIES', 3),
         'max_context_pages' => 4,
         'daily_free_questions' => (int) env('AI_DAILY_FREE_QUESTIONS', 20),
 
@@ -76,6 +78,7 @@ return [
         // the owner never has to know one, and can switch to a free provider when
         // an OpenAI account runs out of credit.
         'endpoints' => [
+            'pollinations' => 'https://text.pollinations.ai/openai',
             'openai' => 'https://api.openai.com/v1',
             'openrouter' => 'https://openrouter.ai/api/v1',
             'groq' => 'https://api.groq.com/openai/v1',
@@ -84,6 +87,22 @@ return [
             'mistral' => 'https://api.mistral.ai/v1',
             'xai' => 'https://api.x.ai/v1',
             'gemini' => 'https://generativelanguage.googleapis.com/v1beta/openai',
+        ],
+
+        // Providers that answer without a key. The teacher is "ready" for these
+        // even with no key stored, so the owner can run free with no signup.
+        'keyless' => ['pollinations'],
+
+        'models' => [
+            'pollinations' => 'openai',
+            'openai' => 'gpt-4o-mini',
+            'openrouter' => 'google/gemma-4-31b-it:free',
+            'groq' => 'llama-3.3-70b-versatile',
+            'gemini' => 'gemini-2.0-flash',
+            'deepseek' => 'deepseek-chat',
+            'mistral' => 'mistral-small-latest',
+            'together' => 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+            'xai' => 'grok-2-latest',
         ],
     ],
 

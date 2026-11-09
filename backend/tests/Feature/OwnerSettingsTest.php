@@ -155,6 +155,41 @@ class OwnerSettingsTest extends TestCase
         $this->assertSame('https://openrouter.ai/api/v1', config('platform.ai.base_url'));
     }
 
+    public function test_the_free_provider_needs_no_key_and_picks_its_own_model(): void
+    {
+        Setting::set('llm_provider', 'pollinations');
+        Setting::set('llm_model', null);
+
+        (new AppServiceProvider(app()))->boot();
+
+        $this->assertSame('https://text.pollinations.ai/openai', config('platform.ai.base_url'));
+        $this->assertSame('openai', config('platform.ai.model'));
+        $this->assertTrue(app(OfflineAiService::class)->available(), 'The free provider needs no key.');
+    }
+
+    public function test_a_free_provider_key_is_checked_without_any_key(): void
+    {
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]], 200)]);
+
+        $result = app(LlmKeyValidator::class)->check('', 'pollinations', 'openai');
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function test_a_rate_limited_free_provider_is_retried(): void
+    {
+        Http::fake(['*' => Http::sequence()
+            ->push(['error' => ['message' => 'Free limit reached']], 429)
+            ->push(['choices' => [['message' => ['content' => 'ok']]]], 200)]);
+
+        config(['platform.ai.provider' => 'pollinations', 'platform.ai.model' => 'openai']);
+
+        $reply = app(OfflineAiService::class)->complete('sys', 'user', 'test');
+
+        $this->assertSame('ok', $reply);
+        Http::assertSentCount(2);
+    }
+
     public function test_a_non_key_setting_is_saved_without_validation(): void
     {
         Http::fake();
