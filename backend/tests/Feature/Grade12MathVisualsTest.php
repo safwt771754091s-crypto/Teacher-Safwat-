@@ -45,6 +45,12 @@ class Grade12MathVisualsTest extends TestCase
         'family-tree', 'sentence-builder', 'clock',
     ];
 
+    /** Kinds implemented by web/assets/interactive-science.js (science/maths). */
+    private const CLIENT_SCIENCE_KINDS = [
+        'diagram', 'shapes', 'triangle', 'vector-2d', 'states-of-matter',
+        'circuit', 'wave', 'bar-chart', 'fractions', 'angles',
+    ];
+
     private function mathsBook(): Textbook
     {
         $grade = Grade::where('level', 12)->firstOrFail();
@@ -72,13 +78,45 @@ class Grade12MathVisualsTest extends TestCase
 
     public function test_model_kinds_are_supported_by_the_client_engine(): void
     {
-        $all = array_merge(self::CLIENT_KINDS, self::CLIENT_3D_KINDS, self::CLIENT_LESSON_KINDS);
+        $all = array_merge(
+            self::CLIENT_KINDS,
+            self::CLIENT_3D_KINDS,
+            self::CLIENT_LESSON_KINDS,
+            self::CLIENT_SCIENCE_KINDS,
+        );
 
         foreach (LessonSection::whereNotNull('visual')->get() as $section) {
             $this->assertContains(
                 $section->visual['kind'] ?? null,
                 $all,
                 "Model kind «{$section->visual['kind']}» is not implemented by the client engines.",
+            );
+        }
+    }
+
+    public function test_the_science_engine_implements_every_kind_it_is_credited_with(): void
+    {
+        $js = file_get_contents(base_path('../web/assets/interactive-science.js'));
+
+        $this->assertNotFalse($js, 'interactive-science.js should exist.');
+        foreach (self::CLIENT_SCIENCE_KINDS as $kind) {
+            $this->assertStringContainsString("KINDS['{$kind}']", $js, "Missing the «{$kind}» model.");
+        }
+    }
+
+    public function test_every_science_subject_has_models_for_all_its_topics(): void
+    {
+        // Physics, chemistry and biology are seeded as curriculum outlines, but
+        // their lesson titles are real topics, so each one can carry a figure.
+        foreach (['الفيزياء', 'الكيمياء', 'الأحياء'] as $subject) {
+            $missing = Lesson::whereHas('textbook.subject', fn ($q) => $q->where('name', $subject))
+                ->whereDoesntHave('sections', fn ($q) => $q->whereNotNull('visual'))
+                ->pluck('title')->unique();
+
+            $this->assertSame(
+                [],
+                $missing->all(),
+                "«{$subject}» lessons without a model: ".$missing->implode('، '),
             );
         }
     }

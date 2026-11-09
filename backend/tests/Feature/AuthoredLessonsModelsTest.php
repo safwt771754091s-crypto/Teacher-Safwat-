@@ -39,13 +39,18 @@ class AuthoredLessonsModelsTest extends TestCase
         $this->assertSame([], $missing->all(), 'Authored lessons without a model: '.$missing->implode('، '));
     }
 
-    public function test_placeholder_lessons_never_get_a_model(): void
+    public function test_placeholder_lessons_never_get_an_authored_model(): void
     {
+        // A placeholder lesson must not get one of *these* models, which claim to
+        // sit beside authored content. Science subjects are different: their
+        // lesson titles are real topics, so ScienceModelsSeeder deliberately
+        // gives them a «نموذج علمي» figure. This test is about the authored set.
         $leaked = LessonSection::whereNotNull('visual')
+            ->where('title', 'like', 'نموذج تفاعلي%')
             ->whereIn('lesson_id', $this->authoredLessonIds())
             ->count();
 
-        $this->assertSame(0, $leaked, 'A curriculum-outline placeholder lesson was given a model.');
+        $this->assertSame(0, $leaked, 'A curriculum-outline placeholder lesson was given an authored model.');
     }
 
     public function test_the_lesson_engine_implements_every_kind_it_is_credited_with(): void
