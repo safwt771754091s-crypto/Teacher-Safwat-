@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AiUsageLog;
 use App\Models\Lesson;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AiTeacherTest extends TestCase
@@ -56,6 +58,32 @@ class AiTeacherTest extends TestCase
             ->postJson("/api/v1/lessons/{$lesson->id}/ask", ['question' => 'ما علامة الجمع؟'])
             ->assertOk();
         $this->assertTrue($res->json('grounded'));
+    }
+
+    public function test_an_invalid_key_at_call_time_is_logged_with_the_provider_reason(): void
+    {
+        // The key was accepted when saved, then expired. The owner's only clue is
+        // the usage log, so it must carry the provider's own words, not just
+        // "failed" — otherwise an expired key looks identical to a network blip.
+        $student = User::where('email', 'student@school.ye')->first();
+        $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
+
+        config(['platform.ai.provider' => 'openai', 'platform.ai.api_key' => 'sk-expired']);
+
+        Http::fake(['*' => Http::response([
+            'error' => ['code' => 'invalid_api_key', 'message' => 'Incorrect API key provided.'],
+        ], 401)]);
+
+        $this->actingAs($student, 'sanctum')
+            ->postJson("/api/v1/lessons/{$lesson->id}/explain", [])
+            ->assertOk();
+
+        $log = AiUsageLog::where('feature', 'explain')->latest('id')->first();
+        $this->assertNotNull($log);
+        $this->assertFalse($log->success);
+        $this->assertStringContainsString('401', (string) $log->error);
+        $this->assertStringContainsString('invalid_api_key', (string) $log->error);
+        $this->assertStringContainsString('Incorrect API key', (string) $log->error);
     }
 
     public function test_summary_endpoint_returns_draft(): void
