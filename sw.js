@@ -19,17 +19,18 @@
  */
 'use strict';
 
-var CACHE = 'safwat-shell-v1';
+var CACHE = 'safwat-shell-v2';
 var SHELL = [
     './',
     './index.html',
     './manifest.webmanifest',
-    './assets/styles.css?v=10',
+    './assets/styles.css?v=11',
     './assets/config.js?v=11',
     './assets/api.js?v=6',
     './assets/interactive.js?v=2',
     './assets/interactive3d.js?v=1',
     './assets/interactive-lessons.js?v=1',
+    './assets/interactive-science.js?v=1',
     './assets/app.js?v=18',
     './assets/pwa.js?v=2',
     './assets/icons/icon-192.png',
