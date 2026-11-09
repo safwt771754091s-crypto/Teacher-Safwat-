@@ -285,14 +285,7 @@
         </div>
         <div id="teacherOut" class="teacher-out hidden"></div>
 
-        <h3>نقاط الدرس من الكتاب</h3>
-        <ul class="points">
-            ${sections.filter((s) => !s.visual).map((s) => `<li class="pt pt-${s.type}">
-                ${s.title ? `<strong>${esc(s.title)}</strong>` : ''}
-                <span>${esc(s.content)}</span>
-                ${s.source_page ? `<span class="page-tag">ص ${s.source_page}</span>` : ''}
-            </li>`).join('') || '<li class="muted">لا توجد نقاط بعد.</li>'}
-        </ul>
+        ${renderLessonPoints(sections)}
 
         ${renderInteractiveModels(sections)}
 
@@ -364,6 +357,30 @@
             <ul class="points">${r.explanation.map((x) => `<li class="pt">${esc(x)}</li>`).join('')}</ul>
             ${r.pages && r.pages.length ? `<div class="muted small">المصدر: صفحات ${r.pages.join('، ')} من الكتاب</div>` : ''}
             ${r.needs_content ? '<div class="warn">لم يُعتمد محتوى هذا الدرس بعد.</div>' : ''}`;
+    }
+
+    // The lesson body. Sections carry `is_from_textbook`: true means quoted from
+    // the official edition, false means teaching material we wrote. The heading
+    // says which, so a learner is never led to think our explanation is the
+    // book's own words.
+    function renderLessonPoints(sections) {
+        const points = sections.filter((s) => !s.visual);
+        if (!points.length) return '<h3>شرح الدرس</h3><p class="muted">لم يُعتمد محتوى هذا الدرس بعد.</p>';
+
+        const fromBook = points.some((s) => s.is_from_textbook);
+        const heading = fromBook ? 'نقاط الدرس من الكتاب' : 'شرح الدرس';
+        const note = fromBook
+            ? ''
+            : '<p class="muted small">شرح من إعداد المنصة، وليس نقلًا حرفيًّا من الكتاب المقرّر.</p>';
+
+        return `<h3>${heading}</h3>${note}
+        <ul class="points">
+            ${points.map((s) => `<li class="pt pt-${s.type}">
+                ${s.title ? `<strong>${esc(s.title)}</strong>` : ''}
+                <span>${esc(s.content)}</span>
+                ${s.source_page ? `<span class="page-tag">ص ${s.source_page}</span>` : ''}
+            </li>`).join('')}
+        </ul>`;
     }
 
     // Interactive models attached to a lesson's sections (visual JSON from the
@@ -593,6 +610,13 @@
 
         if (arabic) speakViaServer(chunks);
     }
+
+    // Exposed so the interactive model engines (interactive.js,
+    // interactive3d.js, interactive-lessons.js, interactive-science.js) narrate
+    // through the same voice pipeline: the on-device voice when it can read
+    // Arabic, the server's TTS otherwise. Without this the models' "اشرحي لي
+    // هذا الشكل" button never appears, because they all guard on window.speak.
+    window.speak = speak;
 
     // Stop any speech currently playing (used by the audio toggle / navigation).
     function stopSpeaking() {

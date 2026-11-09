@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             Grade12MathVisualsSeeder::class,
             AuthoredLessonsModelsSeeder::class,
             ScienceModelsSeeder::class,
+            Grade12ContentSeeder::class,
             UsersAndGamesSeeder::class,
             AgentSeeder::class,
         ]);
