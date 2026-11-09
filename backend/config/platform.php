@@ -71,6 +71,20 @@ return [
         'timeout' => (int) env('LLM_TIMEOUT', 30),
         'max_context_pages' => 4,
         'daily_free_questions' => (int) env('AI_DAILY_FREE_QUESTIONS', 20),
+
+        // OpenAI-compatible endpoints. Choosing a provider picks its base URL, so
+        // the owner never has to know one, and can switch to a free provider when
+        // an OpenAI account runs out of credit.
+        'endpoints' => [
+            'openai' => 'https://api.openai.com/v1',
+            'openrouter' => 'https://openrouter.ai/api/v1',
+            'groq' => 'https://api.groq.com/openai/v1',
+            'together' => 'https://api.together.xyz/v1',
+            'deepseek' => 'https://api.deepseek.com/v1',
+            'mistral' => 'https://api.mistral.ai/v1',
+            'xai' => 'https://api.x.ai/v1',
+            'gemini' => 'https://generativelanguage.googleapis.com/v1beta/openai',
+        ],
     ],
 
     'storage' => [

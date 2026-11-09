@@ -1420,18 +1420,30 @@
             <div class="stat"><b>${ai.failed}</b><span>أخطاء</span></div>
         </div>
         <div class="card">
-            <h3>🤖 إعداد المعلم الذكي (مفتاح النموذج)</h3>
-            <p class="muted small">ألصق مفتاح OpenAI هنا واضغط حفظ. يُختبر المفتاح أمام المزوّد قبل حفظه، فإن كان منتهيًا أو خاطئًا ظهر السبب ولم يُحفظ. بدون مفتاح صالح يعمل المعلم الذكي في الوضع الآمن: يشرح من نصّ الكتاب المعتمد فقط دون اختراع.</p>
+            <h3>🤖 إعداد المعلم الذكي</h3>
+            <p class="muted small">اختر المزوّد، واكتب اسم النموذج، وألصق المفتاح في حقل المفتاح. يُختبر المفتاح أمام المزوّد قبل حفظه: إن كان منتهيًا أو بلا رصيد ظهر السبب ولم يُحفظ. بدون مفتاح صالح يعمل المعلم الذكي في الوضع الآمن: يشرح من نصّ الكتاب المعتمد فقط دون اختراع.</p>
+            <label class="muted small">١ — المزوّد</label>
             <div class="ask-row">
                 <select id="aiProvider">
-                    <option value="openai">OpenAI</option>
+                    <option value="openai">OpenAI (مدفوع)</option>
+                    <option value="openrouter">OpenRouter (فيه نماذج مجانية)</option>
+                    <option value="groq">Groq (فيه نماذج مجانية)</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="together">Together</option>
+                    <option value="xai">xAI (Grok)</option>
                     <option value="none">معطّل (الوضع الآمن)</option>
                 </select>
-                <input id="aiModel" placeholder="اسم النموذج، مثل gpt-4o-mini">
             </div>
+            <label class="muted small">٢ — اسم النموذج (اكتب الاسم فقط، وليس مفتاحًا)</label>
             <div class="ask-row">
-                <input id="aiKey" type="password" placeholder="sk-proj-… أو sk-… (مفتاح OpenAI)" autocomplete="off">
-                <button class="btn primary" id="aiSave">حفظ المفتاح</button>
+                <input id="aiModel" placeholder="مثال: gpt-4o-mini" autocomplete="off">
+            </div>
+            <label class="muted small">٣ — مفتاح المزوّد (الصقه هنا فقط)</label>
+            <div class="ask-row">
+                <input id="aiKey" type="password" placeholder="sk-… أو key_…" autocomplete="off">
+                <button class="btn primary" id="aiSave">حفظ واختبار</button>
             </div>
             <p id="aiMsg" class="muted small"></p>
         </div>
@@ -1472,13 +1484,23 @@
     };
 
     // The owner pastes the model key here; the server proves it before storing.
+    const AI_DEFAULT_MODEL = {
+        openai: 'gpt-4o-mini', openrouter: 'google/gemma-4-31b-it:free', groq: 'llama-3.3-70b-versatile',
+        gemini: 'gemini-2.0-flash', deepseek: 'deepseek-chat', mistral: 'mistral-small-latest',
+        together: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', xai: 'grok-2-latest',
+    };
+
     async function loadAiSettings() {
         try {
             const res = await API.get('/owner/settings');
             const map = {};
             (res.settings || []).forEach((s) => { map[s.key] = s.value; });
-            if (el('aiProvider')) el('aiProvider').value = map.llm_provider === 'openai' ? 'openai' : 'none';
-            if (el('aiModel')) el('aiModel').value = map.llm_model || 'gpt-4o-mini';
+            const provider = map.llm_provider || 'none';
+            if (el('aiProvider')) el('aiProvider').value = provider;
+            // A key pasted into the model box is the mistake we must never repeat.
+            const model = map.llm_model || '';
+            const modelLooksLikeKey = /^(sk-|key_)/.test(model);
+            if (el('aiModel')) el('aiModel').value = modelLooksLikeKey ? (AI_DEFAULT_MODEL[provider] || '') : model;
             const hasKey = !!(map.llm_api_key && String(map.llm_api_key).length);
             if (el('aiMsg')) {
                 el('aiMsg').textContent = hasKey
@@ -1491,15 +1513,29 @@
     async function saveAiSettings() {
         const msg = el('aiMsg');
         const provider = el('aiProvider').value;
-        const model = el('aiModel').value.trim() || 'gpt-4o-mini';
+        let model = el('aiModel').value.trim();
         const key = el('aiKey').value.trim();
+        if (provider === 'none') {
+            msg.textContent = 'جارٍ الحفظ…';
+            try {
+                await API.post('/owner/settings', { key: 'llm_provider', value: 'none' });
+                msg.textContent = '✅ أوقفت المعلم الذكي (الوضع الآمن).';
+            } catch (e) { msg.textContent = '❌ ' + e.message; }
+            return;
+        }
+        if (/^(sk-|key_)/.test(model)) {
+            msg.textContent = '❌ هذا مفتاح وليس اسم نموذج. الصقه في حقل المفتاح (٣).';
+            return;
+        }
+        if (!model) model = AI_DEFAULT_MODEL[provider] || 'gpt-4o-mini';
+        if (!key) { msg.textContent = '❌ ألصق المفتاح في الحقل الثالث (٣).'; return; }
         msg.textContent = 'جارٍ الحفظ والتحقّق من المفتاح…';
         try {
             await API.post('/owner/settings', { key: 'llm_provider', value: provider });
             await API.post('/owner/settings', { key: 'llm_model', value: model });
-            if (key) await API.post('/owner/settings', { key: 'llm_api_key', value: key });
-            msg.textContent = key ? '✅ حُفظ المفتاح وهو صالح ويعمل.' : '✅ حُفظت الإعدادات.';
-            if (key) el('aiKey').value = '';
+            await API.post('/owner/settings', { key: 'llm_api_key', value: key });
+            msg.textContent = '✅ حُفظ المفتاح وهو صالح ويعمل. النموذج: ' + model;
+            el('aiKey').value = '';
         } catch (e) {
             msg.textContent = '❌ ' + e.message;
         }

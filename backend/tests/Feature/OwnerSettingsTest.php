@@ -123,6 +123,38 @@ class OwnerSettingsTest extends TestCase
         $this->assertTrue($result['ok']);
     }
 
+    public function test_an_out_of_credit_account_is_reported_as_such(): void
+    {
+        Http::fake(['*' => Http::response([
+            'error' => ['code' => 'credit_balance_exhausted', 'message' => 'You have no credits remaining.'],
+        ], 429)]);
+
+        $result = app(LlmKeyValidator::class)->check('sk-proj-valid-but-broke');
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('بلا رصيد', $result['message']);
+    }
+
+    public function test_a_key_pasted_into_the_model_field_is_refused(): void
+    {
+        Http::fake();
+
+        $result = app(LlmKeyValidator::class)->check('sk-proj-good', 'openai', 'sk-proj-oops');
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('ليس اسم نموذج', $result['message']);
+        Http::assertNothingSent();
+    }
+
+    public function test_choosing_a_provider_selects_its_endpoint(): void
+    {
+        Setting::set('llm_provider', 'openrouter');
+
+        (new AppServiceProvider(app()))->boot();
+
+        $this->assertSame('https://openrouter.ai/api/v1', config('platform.ai.base_url'));
+    }
+
     public function test_a_non_key_setting_is_saved_without_validation(): void
     {
         Http::fake();

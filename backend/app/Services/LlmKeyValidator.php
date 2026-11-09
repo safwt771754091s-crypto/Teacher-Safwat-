@@ -36,12 +36,27 @@ class LlmKeyValidator
 
         $provider = $provider ?: (string) (Setting::get('llm_provider') ?: config('platform.ai.provider', 'openai'));
         $model = $model ?: (string) (Setting::get('llm_model') ?: config('platform.ai.model', 'gpt-4o-mini'));
-        $baseUrl = rtrim($baseUrl ?: (string) config('platform.ai.base_url', 'https://api.openai.com/v1'), '/');
 
         // A key is being saved, so the owner intends to switch the teacher on.
         // "none" means "not configured yet", not "no provider to check against".
         if ($provider === 'none') {
             $provider = 'openai';
+        }
+
+        $endpoints = (array) config('platform.ai.endpoints', []);
+        $baseUrl = rtrim(
+            $baseUrl ?: ($endpoints[$provider] ?? null) ?: (string) config('platform.ai.base_url', 'https://api.openai.com/v1'),
+            '/'
+        );
+
+        // A key that is valid but cannot generate (an exhausted account) would
+        // still leave the teacher silent, so it is treated as a failure too.
+        if ($model === '' || str_starts_with($model, 'sk-') || str_starts_with($model, 'key_')) {
+            return [
+                'ok' => false,
+                'message' => 'اسم النموذج «'.$model.'» ليس اسم نموذج — يبدو أنه مفتاح وُضع في حقل النموذج. '
+                    .'اتركه فارغًا أو اكتب مثل: gpt-4o-mini',
+            ];
         }
 
         try {
@@ -72,6 +87,16 @@ class LlmKeyValidator
 
         if ($response->status() === 404 && str_contains($detail, 'model')) {
             return ['ok' => false, 'message' => 'المفتاح صالح لكن اسم النموذج «'.$model.'» غير متاح للحساب.'];
+        }
+
+        // The key authenticates but the account cannot generate: the teacher would
+        // stay silent, so say so plainly instead of storing a key that cannot work.
+        if ($response->status() === 429 || in_array($code, ['insufficient_quota', 'credit_balance_exhausted', 'billing_hard_limit_reached'], true)) {
+            return [
+                'ok' => false,
+                'message' => 'المفتاح صحيح لكن الحساب بلا رصيد (أو بلغ حدّه). أضف رصيدًا في '.$provider
+                    .' أو اختر مزوّدًا آخر.'.($detail ? ' — '.$detail : ''),
+            ];
         }
 
         return [

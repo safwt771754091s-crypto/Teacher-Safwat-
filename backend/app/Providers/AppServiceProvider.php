@@ -49,9 +49,20 @@ class AppServiceProvider extends ServiceProvider
             $provider = Setting::get('llm_provider');
             $key = Setting::get('llm_api_key');
             $model = Setting::get('llm_model');
+            $baseUrl = Setting::get('llm_base_url');
 
             if ($provider && ! env('LLM_PROVIDER')) {
                 config(['platform.ai.provider' => $provider]);
+
+                // The console only offers provider names, so resolve the endpoint
+                // here rather than making the owner paste a URL.
+                $endpoints = (array) config('platform.ai.endpoints', []);
+                if (isset($endpoints[$provider]) && ! env('LLM_BASE_URL')) {
+                    config(['platform.ai.base_url' => $endpoints[$provider]]);
+                }
+            }
+            if ($baseUrl && ! env('LLM_BASE_URL')) {
+                config(['platform.ai.base_url' => $baseUrl]);
             }
             if ($key && ! env('LLM_API_KEY')) {
                 config(['platform.ai.api_key' => $key]);
