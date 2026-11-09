@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\DatabaseSnapshotService;
+use App\Services\LlmKeyValidator;
 use App\Services\PlatformReportService;
 use Illuminate\Http\Request;
 use Throwable;
@@ -22,9 +23,10 @@ class OwnerController extends Controller
             $q->where('role', $request->string('role'));
         }
         if ($request->filled('search')) {
-            $q->where(fn ($w) => $w->where('name', 'like', '%' . $request->string('search') . '%')
-                ->orWhere('email', 'like', '%' . $request->string('search') . '%'));
+            $q->where(fn ($w) => $w->where('name', 'like', '%'.$request->string('search').'%')
+                ->orWhere('email', 'like', '%'.$request->string('search').'%'));
         }
+
         return response()->json(['users' => $q->withCount('teacherAssignments')->orderByDesc('id')->paginate(30)]);
     }
 
@@ -42,6 +44,7 @@ class OwnerController extends Controller
         if ($user->role === User::ROLE_STUDENT) {
             $user->studentProfile()->create(['grade_id' => $data['grade_id'] ?? null]);
         }
+
         return response()->json(['user' => $user], 201);
     }
 
@@ -54,6 +57,7 @@ class OwnerController extends Controller
             'phone' => ['nullable', 'string', 'max:30'],
         ]);
         $user->update(array_filter($data, fn ($v) => $v !== null));
+
         return response()->json(['user' => $user]);
     }
 
@@ -65,6 +69,7 @@ class OwnerController extends Controller
         ]);
         $user = User::findOrFail($data['user_id']);
         $user->update(['role' => $data['role']]);
+
         return response()->json(['user' => $user]);
     }
 
@@ -80,6 +85,7 @@ class OwnerController extends Controller
         $failed = AiUsageLog::where('success', false)->count();
         $byFeature = AiUsageLog::selectRaw('feature, count(*) c, sum(cost) cost')
             ->groupBy('feature')->get();
+
         return response()->json([
             'total_requests' => $total,
             'total_cost' => $cost,
@@ -94,10 +100,21 @@ class OwnerController extends Controller
         return response()->json(['settings' => Setting::all()]);
     }
 
-    public function updateSettings(Request $request)
+    public function updateSettings(Request $request, LlmKeyValidator $validator)
     {
         $data = $request->validate(['key' => ['required', 'string'], 'value' => ['nullable']]);
+
+        // A key the provider will reject must not be stored: the AI teacher would
+        // silently stay on its fallback and the owner would never learn why.
+        if ($data['key'] === 'llm_api_key' && is_string($data['value']) && trim($data['value']) !== '') {
+            $check = $validator->check($data['value']);
+            if (! $check['ok']) {
+                return response()->json(['message' => $check['message']], 422);
+            }
+        }
+
         Setting::set($data['key'], $data['value']);
+
         return response()->json(['message' => 'تم الحفظ.']);
     }
 
@@ -161,7 +178,7 @@ class OwnerController extends Controller
         try {
             $target = $snapshots->upload($data['name']);
         } catch (Throwable $e) {
-            return response()->json(['message' => 'تعذّر رفع اللقطة: ' . $e->getMessage()], 422);
+            return response()->json(['message' => 'تعذّر رفع اللقطة: '.$e->getMessage()], 422);
         }
 
         return response()->json(['message' => 'تم رفع اللقطة إلى التخزين البعيد.', 'remote' => $target]);
@@ -174,7 +191,7 @@ class OwnerController extends Controller
         try {
             $path = $snapshots->localPath($data['name']);
         } catch (Throwable $e) {
-            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: ' . $e->getMessage()], 422);
+            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: '.$e->getMessage()], 422);
         }
         if (! $path) {
             return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
@@ -183,7 +200,7 @@ class OwnerController extends Controller
         try {
             $snapshots->restore($path);
         } catch (Throwable $e) {
-            return response()->json(['message' => 'تعذّرت الاستعادة: ' . $e->getMessage()], 422);
+            return response()->json(['message' => 'تعذّرت الاستعادة: '.$e->getMessage()], 422);
         }
 
         return response()->json(['message' => 'تمت استعادة اللقطة.', 'name' => $data['name']]);
@@ -196,7 +213,7 @@ class OwnerController extends Controller
         try {
             $path = $snapshots->localPath($data['name']);
         } catch (Throwable $e) {
-            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: ' . $e->getMessage()], 422);
+            return response()->json(['message' => 'تعذّر جلب اللقطة من التخزين البعيد: '.$e->getMessage()], 422);
         }
         if (! $path) {
             return response()->json(['message' => 'لم يُعثر على اللقطة المطلوبة.'], 404);
@@ -214,11 +231,11 @@ class OwnerController extends Controller
 
     public function downloadPlatformReport(PlatformReportService $report)
     {
-        $name = 'platform-report-' . gmdate('Ymd-His');
+        $name = 'platform-report-'.gmdate('Ymd-His');
 
         return response($report->pdf(), 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="report.pdf"; filename*=UTF-8\'\'' . rawurlencode($name . '.pdf'),
+            'Content-Disposition' => 'attachment; filename="report.pdf"; filename*=UTF-8\'\''.rawurlencode($name.'.pdf'),
         ]);
     }
 }

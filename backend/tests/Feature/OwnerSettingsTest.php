@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Setting;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
+use App\Services\LlmKeyValidator;
 use App\Services\OfflineAiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
@@ -72,15 +74,72 @@ class OwnerSettingsTest extends TestCase
 
     public function test_the_owner_can_save_settings_through_the_api(): void
     {
-        $owner = User::firstOrCreate(
+        // The provider is the one thing we do not own; a live call is replaced by
+        // a faked success so the test exercises our wiring, not OpenAI's uptime.
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]], 200)]);
+
+        $owner = $this->owner();
+
+        $this->actingAs($owner)
+            ->postJson('/api/v1/owner/settings', ['key' => 'llm_api_key', 'value' => 'sk-proj-a-valid-key'])
+            ->assertOk();
+
+        $this->assertSame('sk-proj-a-valid-key', Setting::get('llm_api_key'));
+    }
+
+    public function test_a_key_the_provider_rejects_is_not_stored(): void
+    {
+        Http::fake(['*' => Http::response([
+            'error' => ['code' => 'expired_secret_key', 'message' => 'Your API key has expired.'],
+        ], 401)]);
+
+        $this->actingAs($this->owner())
+            ->postJson('/api/v1/owner/settings', ['key' => 'llm_api_key', 'value' => 'sk-proj-expired'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn ($m) => str_contains($m, 'منتهي الصلاحية'));
+
+        $this->assertNull(Setting::get('llm_api_key'));
+    }
+
+    public function test_an_openhands_cloud_key_is_refused_before_any_call(): void
+    {
+        Http::fake();
+
+        $this->actingAs($this->owner())
+            ->postJson('/api/v1/owner/settings', ['key' => 'llm_api_key', 'value' => 'sk-oh-abc123'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', fn ($m) => str_contains($m, 'OpenHands Cloud'));
+
+        Http::assertNothingSent();
+        $this->assertNull(Setting::get('llm_api_key'));
+    }
+
+    public function test_the_validator_accepts_a_working_key(): void
+    {
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]], 200)]);
+
+        $result = app(LlmKeyValidator::class)->check('sk-proj-good');
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function test_a_non_key_setting_is_saved_without_validation(): void
+    {
+        Http::fake();
+
+        $this->actingAs($this->owner())
+            ->postJson('/api/v1/owner/settings', ['key' => 'llm_model', 'value' => 'gpt-4o-mini'])
+            ->assertOk();
+
+        Http::assertNothingSent();
+        $this->assertSame('gpt-4o-mini', Setting::get('llm_model'));
+    }
+
+    private function owner(): User
+    {
+        return User::firstOrCreate(
             ['email' => 'owner@test.ye'],
             ['name' => 'المالك', 'password' => bcrypt('Owner@Yemen2026'), 'role' => 'owner'],
         );
-
-        $this->actingAs($owner)
-            ->postJson('/api/v1/owner/settings', ['key' => 'llm_api_key', 'value' => 'sk-saved-via-api'])
-            ->assertOk();
-
-        $this->assertSame('sk-saved-via-api', Setting::get('llm_api_key'));
     }
 }
