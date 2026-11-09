@@ -1420,6 +1420,22 @@
             <div class="stat"><b>${ai.failed}</b><span>أخطاء</span></div>
         </div>
         <div class="card">
+            <h3>🤖 إعداد المعلم الذكي (مفتاح النموذج)</h3>
+            <p class="muted small">ألصق مفتاح OpenAI هنا واضغط حفظ. يُختبر المفتاح أمام المزوّد قبل حفظه، فإن كان منتهيًا أو خاطئًا ظهر السبب ولم يُحفظ. بدون مفتاح صالح يعمل المعلم الذكي في الوضع الآمن: يشرح من نصّ الكتاب المعتمد فقط دون اختراع.</p>
+            <div class="ask-row">
+                <select id="aiProvider">
+                    <option value="openai">OpenAI</option>
+                    <option value="none">معطّل (الوضع الآمن)</option>
+                </select>
+                <input id="aiModel" placeholder="اسم النموذج، مثل gpt-4o-mini">
+            </div>
+            <div class="ask-row">
+                <input id="aiKey" type="password" placeholder="sk-proj-… أو sk-… (مفتاح OpenAI)" autocomplete="off">
+                <button class="btn primary" id="aiSave">حفظ المفتاح</button>
+            </div>
+            <p id="aiMsg" class="muted small"></p>
+        </div>
+        <div class="card">
             <h3>المستخدمون</h3>
             <div class="ask-row"><input id="uSearch" placeholder="بحث بالاسم أو البريد"><select id="uRole">
                 <option value="">كل الأدوار</option><option value="student">طالب</option><option value="teacher">معلم</option>
@@ -1448,10 +1464,46 @@
         el('uLoadBtn').onclick = loadUsers;
         el('snapCreate').onclick = createDbSnapshot;
         if (el('reportDownload')) el('reportDownload').onclick = downloadPlatformReport;
+        await loadAiSettings();
+        if (el('aiSave')) el('aiSave').onclick = saveAiSettings;
         await loadUsers();
         await loadDbSnapshots();
         busy(false);
     };
+
+    // The owner pastes the model key here; the server proves it before storing.
+    async function loadAiSettings() {
+        try {
+            const res = await API.get('/owner/settings');
+            const map = {};
+            (res.settings || []).forEach((s) => { map[s.key] = s.value; });
+            if (el('aiProvider')) el('aiProvider').value = map.llm_provider === 'openai' ? 'openai' : 'none';
+            if (el('aiModel')) el('aiModel').value = map.llm_model || 'gpt-4o-mini';
+            const hasKey = !!(map.llm_api_key && String(map.llm_api_key).length);
+            if (el('aiMsg')) {
+                el('aiMsg').textContent = hasKey
+                    ? '✅ يوجد مفتاح محفوظ. الصقه من جديد لاستبداله.'
+                    : '⚠️ لا يوجد مفتاح صالح — المعلم الذكي يعمل في الوضع الآمن.';
+            }
+        } catch (e) { /* the rest of the console still works */ }
+    }
+
+    async function saveAiSettings() {
+        const msg = el('aiMsg');
+        const provider = el('aiProvider').value;
+        const model = el('aiModel').value.trim() || 'gpt-4o-mini';
+        const key = el('aiKey').value.trim();
+        msg.textContent = 'جارٍ الحفظ والتحقّق من المفتاح…';
+        try {
+            await API.post('/owner/settings', { key: 'llm_provider', value: provider });
+            await API.post('/owner/settings', { key: 'llm_model', value: model });
+            if (key) await API.post('/owner/settings', { key: 'llm_api_key', value: key });
+            msg.textContent = key ? '✅ حُفظ المفتاح وهو صالح ويعمل.' : '✅ حُفظت الإعدادات.';
+            if (key) el('aiKey').value = '';
+        } catch (e) {
+            msg.textContent = '❌ ' + e.message;
+        }
+    }
 
     // Download the whole-platform PDF report with the bearer token.
     async function downloadPlatformReport() {
