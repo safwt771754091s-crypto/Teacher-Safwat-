@@ -271,6 +271,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
 .im-card h4 { margin: 0 0 6px; }
 .im-model { position: relative; }
 .im-canvas { display: block; width: 100%; border-radius: 12px; background: #fbfdfd; border: 1px solid #e6ecec; touch-action: none; }
+.im-canvas3d { cursor: grab; box-shadow: inset 0 1px 0 #fff, 0 6px 18px -12px rgba(15,23,42,.5); }
+.im-spin-toggle {
+    margin: 6px 0 2px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+    border: 1px solid #cbd5e1; border-radius: 999px; background: #f1f5f9; color: #334155;
+}
+.im-spin-toggle:hover { background: #e2e8f0; }
 .im-readout { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 10px 0 4px; }
 .im-readout code {
     background: #f1f5f4; color: #0f3f3a; border: 1px solid #dbe7e4;

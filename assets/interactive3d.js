@@ -26,6 +26,26 @@
     function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
     function unit(a) { var m = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / m, a[1] / m, a[2] / m]; }
 
+    // Convex hull (monotone chain) of 2-D points, used for the contact shadow.
+    function convexHull(pts) {
+        var p = pts.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+        if (p.length < 3) return p;
+        function half(seq) {
+            var out = [];
+            seq.forEach(function (q) {
+                while (out.length >= 2) {
+                    var o = out[out.length - 2], r = out[out.length - 1];
+                    if ((r[0] - o[0]) * (q[1] - o[1]) - (r[1] - o[1]) * (q[0] - o[0]) <= 0) out.pop();
+                    else break;
+                }
+                out.push(q);
+            });
+            out.pop();
+            return out;
+        }
+        return half(p).concat(half(p.slice().reverse()));
+    }
+
     function el(tag, cls, text) {
         var n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -299,10 +319,11 @@
             window.addEventListener('resize', this._resize);
         }
 
-        // Orbit by dragging; pinch or wheel to zoom.
+        // Orbit by dragging; pinch or wheel to zoom. Auto-rotation pauses while
+        // the learner is dragging, then resumes, so the solid always reads as 3-D.
         var drag = null;
         function pos(ev) { var r = self.canvas.getBoundingClientRect(); var p = ev.touches ? ev.touches[0] : ev; return { x: p.clientX - r.left, y: p.clientY - r.top }; }
-        function down(ev) { drag = pos(ev); if (ev.cancelable) ev.preventDefault(); }
+        function down(ev) { drag = pos(ev); self.pauseSpin(); if (ev.cancelable) ev.preventDefault(); }
         function move(ev) {
             if (!drag) return;
             var p = pos(ev);
@@ -311,7 +332,7 @@
             self.draw();
             if (ev.cancelable) ev.preventDefault();
         }
-        function up() { drag = null; }
+        function up() { if (drag) { drag = null; self.resumeSpin(); } }
         this.canvas.addEventListener('mousedown', down);
         window.addEventListener('mousemove', move);
         window.addEventListener('mouseup', up);
@@ -325,8 +346,40 @@
         }, { passive: false });
         this.canvas.style.cursor = 'grab';
 
+        // Auto-rotation: gentle, respectful of reduced-motion, and toggleable.
+        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        this.autoRotate = opts.autoRotate !== false && !reduce; // the learner's wish
+        this._raf = null;
+        this._spinToggle = el('button', 'im-spin-toggle', this.autoRotate ? '⏸ إيقاف الدوران' : '▶ تدوير تلقائي');
+        this._spinToggle.type = 'button';
+        this._spinToggle.addEventListener('click', function () {
+            self.autoRotate = !self.autoRotate;
+            self._spinToggle.textContent = self.autoRotate ? '⏸ إيقاف الدوران' : '▶ تدوير تلقائي';
+            if (self.autoRotate) self.resumeSpin(); else self.pauseSpin();
+        });
+        container.appendChild(this._spinToggle);
+
         this.resize();
+        this.resumeSpin();
     }
+
+    // A slow orbit loop that only runs while enabled and not being dragged.
+    Scene.prototype.resumeSpin = function () {
+        if (!this.autoRotate || this._raf) return;
+        var self = this, last = performance.now();
+        function step(t) {
+            if (!self.autoRotate) { self._raf = null; return; }
+            var dt = Math.min(64, t - last); last = t;
+            self.camera.yaw += dt * 0.00022;
+            self.draw();
+            self._raf = requestAnimationFrame(step);
+        }
+        this._raf = requestAnimationFrame(step);
+    };
+    // Stop the loop but keep the learner's auto-rotate preference.
+    Scene.prototype.pauseSpin = function () {
+        if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    };
 
     Scene.prototype.resize = function () {
         this.W = this.container.clientWidth || 320;
@@ -343,6 +396,15 @@
     Scene.prototype.draw = function () {
         var ctx = this.ctx, W = this.W, H = this.height;
         ctx.clearRect(0, 0, W, H);
+
+        // Studio backdrop: a soft vertical gradient so the solid reads as an
+        // object standing on a surface rather than a flat diagram.
+        var bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, '#f8fafc');
+        bg.addColorStop(1, '#e8eef6');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
         var b = this.camera.basis();
         var focal = (H / 2) / Math.tan(this.camera.fov / 2);
         var self = this;
@@ -354,18 +416,41 @@
             return { x: W / 2 + (dot(rel, b.r) / z) * focal, y: H / 2 - (dot(rel, b.u) / z) * focal, z: z };
         }
 
-        // Ground grid, projected as lines on the y = 0 plane.
+        // Ground plane grid on y = 0, with the two principal axes emphasised.
         if (this.grid) {
-            var g = 5, span = 5;
-            ctx.strokeStyle = '#e5e7eb';
+            var span = 5;
             ctx.lineWidth = 1;
             for (var i = -span; i <= span; i++) {
                 var p1 = project([i, 0, -span]), p2 = project([i, 0, span]);
                 var p3 = project([-span, 0, i]), p4 = project([span, 0, i]);
+                ctx.strokeStyle = i === 0 ? '#cbd5e1' : '#e2e8f0';
                 if (p1 && p2) { ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); }
                 if (p3 && p4) { ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke(); }
             }
-            void g;
+
+            // Contact shadow: the convex hull of every vertex dropped to y = 0,
+            // filled softly so the solid appears to rest on the ground.
+            var ground = [];
+            this.meshes.forEach(function (m) { m.v.forEach(function (v) { var s = project([v[0], 0, v[2]]); if (s) ground.push([s.x, s.y]); }); });
+            if (ground.length >= 3) {
+                var hull = convexHull(ground);
+                if (hull.length >= 3) {
+                    ctx.beginPath();
+                    ctx.moveTo(hull[0][0], hull[0][1]);
+                    for (var h = 1; h < hull.length; h++) ctx.lineTo(hull[h][0], hull[h][1]);
+                    ctx.closePath();
+                    var sc = { x: 0, y: 0 };
+                    hull.forEach(function (q) { sc.x += q[0]; sc.y += q[1]; });
+                    sc.x /= hull.length; sc.y /= hull.length;
+                    var rad = Math.max.apply(null, hull.map(function (q) { return Math.hypot(q[0] - sc.x, q[1] - sc.y); })) || 1;
+                    var sg = ctx.createRadialGradient(sc.x, sc.y, 0, sc.x, sc.y, rad * 1.15);
+                    sg.addColorStop(0, 'rgba(15,23,42,.22)');
+                    sg.addColorStop(0.7, 'rgba(15,23,42,.10)');
+                    sg.addColorStop(1, 'rgba(15,23,42,0)');
+                    ctx.fillStyle = sg;
+                    ctx.fill();
+                }
+            }
         }
 
         // Collect every face with its camera depth so nearer faces win.
@@ -407,7 +492,8 @@
             ctx.closePath();
             ctx.fillStyle = 'rgb(' + Math.round(c[0] * s) + ',' + Math.round(c[1] * s) + ',' + Math.round(c[2] * s) + ')';
             ctx.fill();
-            ctx.strokeStyle = 'rgba(15,23,42,.28)';
+            // A faint bright edge gives each facet a crisp, printed quality.
+            ctx.strokeStyle = 'rgba(255,255,255,.35)';
             ctx.lineWidth = 1;
             ctx.stroke();
         });
@@ -427,6 +513,7 @@
     };
 
     Scene.prototype.destroy = function () {
+        this.pauseSpin();
         if (this._ro) this._ro.disconnect();
         else window.removeEventListener('resize', this._resize);
         this.container.innerHTML = '';

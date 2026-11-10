@@ -1677,6 +1677,30 @@
             <div id="snapsArea" class="muted small">جارٍ التحميل…</div>
         </div>
         <div class="card">
+            <h3>📚 تحميل الكتب الرسمية إلى المنصة</h3>
+            <p class="muted small">يُنزّل الخادم كتب المنهج الرسمية (PDF) ويستخرج صفحاتها ونصوصها مباشرة إلى قاعدة البيانات — دون رفع يدوي. تُعالج الكتب على دفعات قصيرة، ويتابع الزر التقدّم حتى تكتمل الكتب المتبقية. المنهج المعتمد للمنصة هو <b>منهج عدن</b> (وزارة التربية والتعليم - عدن) مع الكتب المشتركة.</p>
+            <div class="ask-row">
+                <select id="tbManifest">
+                    <option value="aden" selected>كتب منهج عدن (المنهج المعتمد)</option>
+                    <option value="all">القائمة الشاملة (عدن + صنعاء + المشترك)</option>
+                    <option value="sanaa">كتب صنعاء</option>
+                </select>
+                <select id="tbGrade">
+                    <option value="">كل الصفوف</option>
+                    <option value="1">الصف الأول</option><option value="2">الصف الثاني</option>
+                    <option value="3">الصف الثالث</option><option value="4">الصف الرابع</option>
+                    <option value="5">الصف الخامس</option><option value="6">الصف السادس</option>
+                    <option value="7">الصف السابع</option><option value="8">الصف الثامن</option>
+                    <option value="9">الصف التاسع</option><option value="10">الأول الثانوي</option>
+                    <option value="11">الثاني الثانوي</option><option value="12">الثالث الثانوي</option>
+                </select>
+                <button class="btn primary" id="tbImport">⬇️ ابدأ التحميل</button>
+                <button class="btn" id="tbRefresh">تحديث الحالة</button>
+            </div>
+            <div id="tbProgress" class="muted small">جارٍ التحميل…</div>
+            <div id="tbArea" class="muted small"></div>
+        </div>
+        <div class="card">
             <h3>📄 تقرير المنصة (PDF)</h3>
             <p class="muted small">ملخّص شامل: أعداد الصفوف والمواد والكتب والدروس والمستخدمين والنشاط وتكلفة الذكاء الاصطناعي، مع تغطية المنهج حسب الصف. يُنزَّل كملف PDF جاهز للطباعة.</p>
             <button class="btn primary" id="reportDownload">⬇️ تحميل تقرير المنصة (PDF)</button>
@@ -1684,10 +1708,13 @@
         el('uLoadBtn').onclick = loadUsers;
         el('snapCreate').onclick = createDbSnapshot;
         if (el('reportDownload')) el('reportDownload').onclick = downloadPlatformReport;
+        if (el('tbImport')) el('tbImport').onclick = importTextbooks;
+        if (el('tbRefresh')) el('tbRefresh').onclick = loadTextbookCoverage;
         await loadAiSettings();
         if (el('aiSave')) el('aiSave').onclick = saveAiSettings;
         await loadUsers();
         await loadDbSnapshots();
+        await loadTextbookCoverage();
         busy(false);
     };
 
@@ -1752,6 +1779,57 @@
             el('aiKey').value = '';
         } catch (e) {
             msg.textContent = '❌ ' + e.message;
+        }
+    }
+
+    // ---- Bulk textbook ingestion (server downloads + OCRs the official PDFs) ----
+    // Each call imports a short batch and reports where to resume, so we loop
+    // until the server says it is done — no single long-lived request.
+    let tbImporting = false;
+
+    async function loadTextbookCoverage() {
+        const area = el('tbArea');
+        if (!area) return;
+        try {
+            const grade = el('tbGrade') && el('tbGrade').value;
+            const d = await API.get('/owner/textbooks/coverage' + (grade ? `?grade=${grade}` : ''));
+            const pct = d.books ? Math.round((d.ready / d.books) * 100) : 0;
+            el('tbProgress').innerHTML = `الجاهز: <b>${d.ready}</b> من <b>${d.books}</b> كتاب (${pct}٪) — المتبقّي: <b>${d.pending}</b>`;
+            const rows = (d.items || []).filter((b) => !b.ready).slice(0, 40)
+                .map((b) => `<li class="pt">⏳ ${esc(b.title)} — صفحات مقروءة ${b.readable_pages}/${b.stored_pages}</li>`).join('');
+            area.innerHTML = rows ? `<ul class="points">${rows}</ul>` : '<span class="muted">كل الكتب جاهزة ✅</span>';
+        } catch (e) { area.textContent = e.message; }
+    }
+
+    async function importTextbooks() {
+        if (tbImporting) return;
+        tbImporting = true;
+        const btn = el('tbImport');
+        if (btn) btn.disabled = true;
+        const manifest = el('tbManifest').value;
+        const grade = el('tbGrade').value;
+        let offset = 0, rounds = 0, imported = 0, failed = 0;
+        try {
+            while (rounds < 400) {
+                rounds++;
+                el('tbProgress').innerHTML = `جارٍ التحميل… الدفعة ${rounds} — أُضيف ${imported} كتابًا`;
+                const body = { manifest, offset, max_seconds: 25 };
+                if (grade) body.grade = Number(grade);
+                const r = await API.post('/owner/textbooks/import', body);
+                imported += r.imported || 0;
+                failed += r.failed || 0;
+                await loadTextbookCoverage();
+                if (!r.timed_out) break;
+                if (!r.next_offset || r.next_offset <= offset) break;
+                offset = r.next_offset;
+            }
+            toast(`تمت معالجة الكتب: أُضيف ${imported}${failed ? ` — فشل ${failed}` : ''}`);
+        } catch (e) {
+            toast(e.message, 'error');
+        } finally {
+            tbImporting = false;
+            if (btn) btn.disabled = false;
+            await loadTextbookCoverage();
         }
     }
 
