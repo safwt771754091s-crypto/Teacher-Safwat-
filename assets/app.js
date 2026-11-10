@@ -960,6 +960,7 @@
                 <input id="tbTitle" placeholder="عنوان الكتاب">
                 <select id="tbTerm"><option value="first">الفصل الأول</option><option value="second">الفصل الثاني</option></select>
                 <select id="tbSource"><option value="pdf">PDF</option><option value="images">صور صفحات</option><option value="manual">إدخال يدوي</option></select>
+                <input id="tbDiscover" placeholder="رابط صفحة الفهرس (اختياري)">
                 <button class="btn primary" id="tbCreate">إنشاء</button>
             </div>
         </div>
@@ -971,6 +972,7 @@
                 await API.post('/textbooks', {
                     subject_id: Number(sid), title: el('tbTitle').value,
                     term: el('tbTerm').value, source_type: el('tbSource').value,
+                    discovery_url: el('tbDiscover').value.trim() || null,
                 });
                 toast('تم إنشاء الكتاب'); loadContentBooks();
             } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
@@ -989,12 +991,16 @@
             <div class="ex-actions">
                 <button class="btn small" data-bact="upload-pdf" data-id="${t.id}">📤 رفع PDF</button>
                 <button class="btn small" data-bact="upload-page" data-id="${t.id}">🖼️ رفع صفحة</button>
+                <button class="btn small ghost" data-bact="source" data-id="${t.id}">🔗 المصدر (بحث آلي)</button>
                 <button class="btn small ghost" data-bact="edit" data-id="${t.id}" data-title="${esc(t.title)}" data-term="${esc(t.term)}" data-authority="${esc(t.authority || 'common')}" data-branch="${esc(t.branch || 'general')}">✏️ تعديل البيانات</button>
                 <button class="btn small" data-bact="pages" data-id="${t.id}">📄 مراجعة الصفحات</button>
                 <button class="btn small" data-bact="draft-lessons" data-id="${t.id}">✂️ توليد مسودات الدروس</button>
+                <button class="btn small" data-bact="auto-models" data-id="${t.id}">🤖 توليد النماذج التفاعلية</button>
+                <button class="btn small" data-bact="review-models" data-id="${t.id}">🔎 مراجعة النماذج</button>
                 <button class="btn small" data-bact="publish" data-id="${t.id}">✅ نشر</button>
                 <button class="btn small ghost" data-bact="lessons" data-id="${t.id}">📚 الدروس</button>
             </div>
+            <div class="book-progress" data-progress="${t.id}"></div>
             <div class="book-out"></div>
         </div>`;
     }
@@ -1020,8 +1026,11 @@
             inp.onchange = async () => {
                 const fd = new FormData(); fd.append('file', inp.files[0]);
                 busy(true);
-                try { const r = await API.post(`/textbooks/${id}/upload-pdf`, fd); toast(`تم استخراج ${r.pages_extracted} صفحة`); card.querySelector('.book-out').innerHTML = `<div class="warn">راجع النص المستخرج قبل النشر. عدد الصفحات: ${r.pages_extracted}</div>`; }
-                catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+                try {
+                    await API.post(`/textbooks/${id}/upload-pdf`, fd);
+                    toast('تم رفع الكتاب وبدأت المعالجة');
+                    startJobPolling(id, card);
+                } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
             };
             inp.click();
         } else if (act === 'upload-page') {
@@ -1030,15 +1039,213 @@
             openBookEdit(card);
         } else if (act === 'pages') {
             openPagesReview(id, card);
+        } else if (act === 'source') {
+            openSourcePanel(id, card);
         } else if (act === 'draft-lessons') {
             busy(true);
             API.post(`/textbooks/${id}/draft-lessons`, {}).then((r) => { toast(`تم إنشاء ${r.lessons_created} درس مسودة`); loadContentBooks(); }).catch((e) => toast(e.message, 'error')).finally(() => busy(false));
+        } else if (act === 'auto-models') {
+            busy(true);
+            API.post(`/textbooks/${id}/job`, {}).then(() => { toast('بدأت المعالجة الآلية'); startJobPolling(id, card); }).catch((e) => toast(e.message, 'error')).finally(() => busy(false));
+        } else if (act === 'review-models') {
+            openModelsReview(id, card);
         } else if (act === 'publish') {
             busy(true);
             API.post(`/textbooks/${id}/publish`, {}).then(() => { toast('تم النشر'); loadContentBooks(); }).catch((e) => toast(e.message, 'error')).finally(() => busy(false));
         } else if (act === 'lessons') {
             openLessonAdmin(id, card);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Source discovery: find a book's file, then attach it deliberately
+    // ---------------------------------------------------------------------
+
+    // The Crawlee helper proposes the files an index page links to; it never
+    // attaches one on its own. This panel shows what the book already has, lets
+    // a reviewer re-scan, and attaches the chosen PDF as the book's source.
+    async function openSourcePanel(id, card) {
+        const host = card.querySelector('.book-out');
+        busy(true);
+        let data;
+        try {
+            data = await API.get(`/textbooks/${id}/source`);
+        } catch (e) { toast(e.message, 'error'); busy(false); return; }
+        busy(false);
+        renderSourcePanel(id, card, host, data);
+    }
+
+    function renderSourcePanel(id, card, host, data) {
+        const tb = data.textbook || {};
+        const cands = data.candidates || [];
+        const available = data.crawlee_available;
+        const current = tb.source_url || tb.file_path;
+        host.innerHTML = `
+            <div class="source-panel">
+                <div class="job-head">
+                    <strong>مصدر الكتاب</strong>
+                    <span class="muted small">${available ? 'أداة البحث الآلي متاحة' : 'أداة البحث الآلي غير مثبّتة'}</span>
+                </div>
+                ${current
+                    ? `<div class="muted small">المصدر الحالي: <span class="chip">${esc(current)}</span></div>`
+                    : '<div class="warn">لا يوجد ملف مصدر بعد. حدّد صفحة الفهرس ثم ابحث، أو ارفع ملفًا.</div>'}
+                <label>رابط صفحة الفهرس
+                    <input id="srcIndex" value="${esc(tb.discovery_url || '')}" placeholder="https://...">
+                </label>
+                <div class="ex-actions">
+                    <button class="btn small" id="srcDiscover">🔍 بحث آلي عن الملفات</button>
+                </div>
+                ${cands.length ? `
+                    <div class="src-cands">
+                        ${cands.map((c, i) => `
+                            <label class="src-cand">
+                                <input type="radio" name="srcPick" value="${esc(c.url)}" ${i === 0 ? 'checked' : ''}>
+                                <span class="chip">${c.is_pdf ? 'PDF' : 'رابط'}</span>
+                                <span class="muted small">${esc((c.text || '').slice(0, 80) || c.url)}</span>
+                            </label>`).join('')}
+                        <button class="btn primary small" id="srcAttach">✅ اعتماد المحدد كمصدر وبدء المعالجة</button>
+                    </div>` : '<p class="muted small">لم يُعثر على روابط بعد.</p>'}
+            </div>`;
+        const disc = host.querySelector('#srcDiscover');
+        if (disc) disc.onclick = async () => {
+            const url = host.querySelector('#srcIndex').value.trim();
+            if (!url) { toast('أدخل رابط صفحة الفهرس', 'error'); return; }
+            busy(true);
+            try {
+                const r = await API.post(`/textbooks/${id}/discover-source`, { discovery_url: url });
+                toast(`تم العثور على ${(r.candidates || []).length} رابط`);
+                renderSourcePanel(id, card, host, { textbook: r.textbook, candidates: r.candidates, crawlee_available: available });
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
+        const attach = host.querySelector('#srcAttach');
+        if (attach) attach.onclick = async () => {
+            const pick = host.querySelector('input[name="srcPick"]:checked');
+            if (!pick) { toast('اختر ملفًا أولًا', 'error'); return; }
+            busy(true);
+            try {
+                await API.post(`/textbooks/${id}/attach-source`, { url: pick.value });
+                toast('تم اعتماد المصدر وبدأت المعالجة');
+                startJobPolling(id, card);
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
+    }
+
+    // ---------------------------------------------------------------------
+    // Automatic book -> interactive models pipeline
+    // ---------------------------------------------------------------------
+
+    // One poll = one bounded slice of server work, so the progress bar advances
+    // while a long book is processed instead of the request timing out.
+    const jobTimers = {};
+
+    function startJobPolling(id, card) {
+        if (jobTimers[id]) return;
+        const host = card.querySelector(`[data-progress="${id}"]`) || card;
+        const tick = async () => {
+            let data;
+            try {
+                data = await API.get(`/textbooks/${id}/job`);
+            } catch (e) {
+                clearInterval(jobTimers[id]); delete jobTimers[id];
+                toast(e.message, 'error');
+                return;
+            }
+            renderJobProgress(host, data, id, card);
+            const st = data.job && data.job.status;
+            if (st !== 'queued' && st !== 'extracting' && st !== 'segmenting' && st !== 'generating') {
+                clearInterval(jobTimers[id]); delete jobTimers[id];
+                if (st === 'review') toast('انتهى التوليد — راجع النماذج ثم اعتمدها');
+                if (st === 'failed') toast('توقفت المعالجة: ' + (data.job.last_error || ''), 'error');
+                loadContentBooks();
+            }
+        };
+        tick();
+        jobTimers[id] = setInterval(tick, 3000);
+    }
+
+    function renderJobProgress(host, data, id, card) {
+        const j = data.job || {};
+        const pct = data.percent || 0;
+        const stage = j.stage || 'في الانتظار';
+        const active = ['queued', 'extracting', 'segmenting', 'generating'].indexOf(j.status) !== -1;
+        host.innerHTML = `
+            <div class="job-box">
+                <div class="job-head">
+                    <span>${active ? '⏳' : (j.status === 'failed' ? '⚠️' : '✅')} ${esc(stage)}</span>
+                    <span class="muted small">${pct}%</span>
+                </div>
+                <div class="job-bar"><span style="width:${pct}%"></span></div>
+                <div class="muted small">
+                    الصفحات: ${j.pages_done || 0}/${j.pages_total || 0}
+                    · الدروس: ${data.lessons || 0}
+                    · النماذج: ${data.models || 0}
+                </div>
+                ${j.last_error ? `<div class="warn">${esc(j.last_error)}</div>` : ''}
+                ${j.status === 'review' ? `<button class="btn small" data-bact="review-models" data-id="${id}">🔎 مراجعة النماذج واعتمادها</button>` : ''}
+            </div>`;
+        host.querySelectorAll('[data-bact]').forEach((b) => {
+            b.onclick = () => bookAction(b.dataset.bact, b.dataset.id, card);
+        });
+    }
+
+    async function openModelsReview(id, card) {
+        const host = card.querySelector('.book-out');
+        busy(true);
+        try {
+            const r = await API.get(`/textbooks/${id}/models`);
+            const lessons = r.lessons || [];
+            const total = lessons.reduce((n, l) => n + (l.models ? l.models.length : 0), 0);
+            if (!total) {
+                host.innerHTML = '<div class="warn">لا توجد نماذج بعد. ارفع الكتاب ثم شغّل التوليد الآلي.</div>';
+                return;
+            }
+            host.innerHTML = `
+                <div class="models-review">
+                    <div class="job-head"><strong>النماذج المولّدة</strong>
+                        <span class="muted small">${total} نموذج في ${lessons.length} درس</span>
+                    </div>
+                    ${lessons.map((l) => `
+                        <div class="rev-lesson">
+                            <label class="rev-lesson-head">
+                                <input type="checkbox" class="rev-pick" value="${l.id}" checked>
+                                <strong>${esc(l.title)}</strong>
+                                <span class="muted small">ص ${l.page_from || '?'}-${l.page_to || '?'}</span>
+                            </label>
+                            ${(l.models || []).map((m) => `
+                                <div class="rev-model">
+                                    <span class="chip">${esc(m.kind)}</span>
+                                    <span class="muted small">📄 صفحة ${m.source_page || '?'}</span>
+                                    <div class="muted small">${esc((m.prompt || m.content || '').slice(0, 120))}</div>
+                                    <div class="im-host" data-visual-kind="${esc(m.kind)}" data-visual-spec='${esc(JSON.stringify(m.kind && { kind: m.kind, params: (m.params || {}) }))}'></div>
+                                </div>`).join('')}
+                        </div>`).join('')}
+                    <button class="btn" id="revApprove">✅ اعتماد ونشر المحدد للطلاب</button>
+                </div>`;
+            // Render each model with the existing engine, so the reviewer sees
+            // exactly what the student will see before approving it.
+            host.querySelectorAll('[data-visual-kind]').forEach((elx) => {
+                if (window.Interactive) {
+                    let spec = null;
+                    try { spec = JSON.parse(elx.dataset.visualSpec); } catch (e) { spec = null; }
+                    if (spec && spec.kind) { try { window.Interactive.render(elx, spec, {}); } catch (e) { elx.textContent = 'تعذّر عرض النموذج'; } }
+                }
+            });
+            const btn = host.querySelector('#revApprove');
+            if (btn) btn.onclick = () => approveModels(id, card, host);
+        } catch (e) {
+            toast(e.message, 'error');
+        } finally { busy(false); }
+    }
+
+    async function approveModels(id, card, host) {
+        const ids = Array.from(host.querySelectorAll('.rev-pick:checked')).map((c) => parseInt(c.value, 10));
+        if (!ids.length) { toast('اختر درساً واحداً على الأقل', 'error'); return; }
+        busy(true);
+        try {
+            const r = await API.post(`/textbooks/${id}/approve-models`, { lesson_ids: ids });
+            toast(`تم نشر ${r.published} درس للطلاب`);
+            loadContentBooks();
+        } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
     }
 
     function openBookEdit(card) {
