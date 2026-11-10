@@ -111,6 +111,17 @@ Route::prefix('v1')->group(function () {
             Route::get('textbooks/{textbook}/pages', [TeacherController::class, 'pages']);
             Route::post('textbooks/{textbook}/draft-lessons', [TeacherController::class, 'draftLessons']);
             Route::post('textbooks/{textbook}/publish', [TeacherController::class, 'publishTextbook']);
+
+            // Automatic book -> interactive models pipeline (resumable).
+            Route::get('textbooks/{textbook}/job', [TeacherController::class, 'jobStatus']);
+            Route::post('textbooks/{textbook}/job', [TeacherController::class, 'startJob']);
+            Route::get('textbooks/{textbook}/models', [TeacherController::class, 'reviewModels']);
+            Route::post('textbooks/{textbook}/approve-models', [TeacherController::class, 'approveModels']);
+
+            // Source discovery (optional Crawlee helper) and attaching a source.
+            Route::get('textbooks/{textbook}/source', [TeacherController::class, 'sourceStatus']);
+            Route::post('textbooks/{textbook}/discover-source', [TeacherController::class, 'discoverSource']);
+            Route::post('textbooks/{textbook}/attach-source', [TeacherController::class, 'attachSource']);
             Route::patch('pages/{page}', [TeacherController::class, 'updatePage']);
             Route::post('textbooks/{textbook}/lessons', [TeacherController::class, 'createLesson']);
             Route::post('lessons/{lesson}/sections', [TeacherController::class, 'createSection']);

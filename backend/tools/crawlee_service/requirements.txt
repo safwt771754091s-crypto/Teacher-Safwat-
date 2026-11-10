@@ -1,0 +1,6 @@
+# The optional content-discovery helper (see crawl_books.py).
+# Crawlee is used only to discover and fetch *source* material for a book
+# (e.g. an index page listing the official PDF editions). It is never part of
+# the request path: if it is missing the platform still works, because the
+# platform's own extractor handles the PDF itself.
+crawlee[beautifulsoup]>=1.11,<2

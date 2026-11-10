@@ -244,10 +244,23 @@ class AiTeacherService
                 'prompt_tokens' => (int) ($response->json('usage.prompt_tokens') ?? 0),
                 'completion_tokens' => (int) ($response->json('usage.completion_tokens') ?? 0),
                 'success' => $response->successful(),
+                // A failed call is the only clue the owner gets that a key has
+                // expired, so keep the provider's own words. Without this the log
+                // says "failed" and the cause (invalid key, no credit) is lost.
+                'error' => $response->successful() ? null : $this->describeFailure($response),
             ]);
         } catch (\Throwable) {
             // logging must never break the request
         }
+    }
+
+    /** The provider's reason for a rejected request, in one short line. */
+    private function describeFailure($response): string
+    {
+        $code = (string) $response->json('error.code', '');
+        $detail = (string) $response->json('error.message', '');
+
+        return trim(sprintf('HTTP %d%s%s', $response->status(), $code !== '' ? " ({$code})" : '', $detail !== '' ? ": {$detail}" : ''));
     }
 
     /**

@@ -106,6 +106,20 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Optional content-discovery helper (Crawlee)
+    |--------------------------------------------------------------------------
+    | tools/crawlee_service/crawl_books.py can look up official PDF editions from
+    | an index page. It is optional: when Python or Crawlee is absent the
+    | platform's own PDF extractor still does all the work.
+    */
+    'crawlee' => [
+        'python' => env('CRAWLEE_PYTHON', 'python3'),
+        'timeout' => (int) env('CRAWLEE_TIMEOUT', 90),
+        'script' => env('CRAWLEE_SCRIPT', base_path('tools/crawlee_service/crawl_books.py')),
+    ],
+
     'storage' => [
         'textbook_disk' => env('TEXTBOOK_DISK', 'public'),
     ],

@@ -75,6 +75,180 @@ class ContentExtractionService
         return $result;
     }
 
+    /**
+     * Extract only pages [$from, $from+$limit-1] of a book, for the resumable
+     * pipeline. Same text-layer-then-OCR logic as extractPdf(), but bounded so a
+     * huge book is processed in slices and a killed run re-does at most one slice.
+     *
+     * Idempotent: pages are upserted by (textbook, page_number), so re-running a
+     * slice overwrites those rows instead of duplicating them.
+     *
+     * @return array{pages_total:int,processed:int,ocr_pages:int}
+     */
+    public function extractPdfRange(Textbook $textbook, int $from, int $limit): array
+    {
+        $from = max(1, $from);
+        $limit = max(1, $limit);
+        $empty = ['pages_total' => 0, 'processed' => 0, 'ocr_pages' => 0];
+
+        $run = function (string $pdf) use ($textbook, $from, $limit) {
+            // The text layer needs no external binary; only OCR does, and that is
+            // checked below. Counting the layer this way keeps a book readable on
+            // a host without poppler installed.
+            $textPages = $this->textLayerSlice($pdf, $from, $from + $limit - 1);
+            $pagesTotal = max($this->pdfPageCount($pdf), $this->textLayerPageCount($pdf), $from + count($textPages) - 1);
+            if ($pagesTotal === 0) {
+                return ['pages_total' => 0, 'processed' => 0, 'ocr_pages' => 0];
+            }
+            if ($from > $pagesTotal) {
+                return ['pages_total' => $pagesTotal, 'processed' => 0, 'ocr_pages' => 0];
+            }
+
+            $to = min($pagesTotal, $from + $limit - 1);
+
+            // OCR only when some page in the slice has an unusable text layer.
+            $needOcr = false;
+            for ($n = $from; $n <= $to; $n++) {
+                if (! $this->looksReadable($textPages[$n] ?? '')) {
+                    $needOcr = true;
+                    break;
+                }
+            }
+            $ocr = ($needOcr && $this->ocrAvailable()) ? $this->ocrPdfPageRange($pdf, $from, $to) : [];
+
+            $processed = 0;
+            $ocrPages = 0;
+            for ($n = $from; $n <= $to; $n++) {
+                $layer = $textPages[$n] ?? '';
+                $useOcr = ! $this->looksReadable($layer) && ! empty($ocr[$n]);
+                $text = $this->normalizeArabic($useOcr ? $ocr[$n] : $layer);
+                if ($useOcr) {
+                    $ocrPages++;
+                }
+                TextbookPage::updateOrCreate(
+                    ['textbook_id' => $textbook->id, 'page_number' => $n],
+                    ['extracted_text' => $text, 'status' => $text !== '' ? 'extracted' : 'raw'],
+                );
+                $processed++;
+            }
+
+            $textbook->update(['pages_count' => max($textbook->pages_count, $pagesTotal)]);
+
+            return ['pages_total' => $pagesTotal, 'processed' => $processed, 'ocr_pages' => $ocrPages];
+        };
+
+        if ($textbook->file_path) {
+            return $this->withLocalFile($textbook->file_path, $run) ?? $empty;
+        }
+
+        if ($textbook->source_url) {
+            $pdf = $this->downloadPdf($textbook->source_url);
+            if ($pdf === null) {
+                return $empty;
+            }
+            try {
+                return $run($pdf);
+            } finally {
+                if (is_file($pdf)) {
+                    @unlink($pdf);
+                }
+            }
+        }
+
+        return $empty;
+    }
+
+    /** Number of pages the embedded text layer reports (0 when unreadable). */
+    private function textLayerPageCount(string $absolutePath): int
+    {
+        try {
+            return count((new Parser())->parseFile($absolutePath)->getPages());
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The text layer for pages [$from, $to] only, keyed by absolute page number.
+     *
+     * @return array<int, string>
+     */
+    private function textLayerSlice(string $absolutePath, int $from, int $to): array
+    {
+        $out = [];
+        try {
+            $pages = (new Parser())->parseFile($absolutePath)->getPages();
+        } catch (\Throwable $e) {
+            return $out;
+        }
+        foreach ($pages as $i => $page) {
+            $n = $i + 1;
+            if ($n < $from || $n > $to) {
+                continue;
+            }
+            $out[$n] = trim((string) $page->getText());
+        }
+
+        return $out;
+    }
+
+    /**
+     * OCR only pages [$from, $to] by asking pdftoppm to rasterise that range.
+     *
+     * @return array<int, string> page number => recognised text
+     */
+    private function ocrPdfPageRange(string $absolutePath, int $from, int $to): array
+    {
+        $out = [];
+        $tmp = sys_get_temp_dir() . '/ocr_' . bin2hex(random_bytes(6));
+        @mkdir($tmp, 0775, true);
+
+        try {
+            $dpi = (int) config('platform.ocr.dpi', 220);
+            @shell_exec(sprintf(
+                '%s -f %d -l %d -r %d -png %s %s 2>/dev/null',
+                escapeshellarg(config('platform.ocr.pdftoppm')),
+                $from,
+                $to,
+                $dpi,
+                escapeshellarg($absolutePath),
+                escapeshellarg($tmp . '/page'),
+            ));
+
+            $workers = max(1, (int) config('platform.ocr.workers', 2));
+            $threads = max(1, (int) config('platform.ocr.threads', 1));
+            $script = $tmp . '/run.sh';
+            file_put_contents($script, sprintf(
+                "#!/bin/sh\nimg=\"\$1\"\nexport OMP_THREAD_LIMIT=%d\n%s \"\$img\" \"out_\$(basename \"\$img\" .png)\" -l %s 2>/dev/null\n",
+                $threads,
+                config('platform.ocr.tesseract'),
+                config('platform.ocr.language'),
+            ));
+            @shell_exec(sprintf(
+                'cd %s && ls page*.png 2>/dev/null | xargs -r -P %d -n1 sh %s',
+                escapeshellarg($tmp),
+                $workers,
+                escapeshellarg($script),
+            ));
+
+            foreach (glob($tmp . '/page*.png') ?: [] as $img) {
+                if (! preg_match('/page-?(\d+)\.png$/', $img, $m)) {
+                    continue;
+                }
+                $n = (int) $m[1];
+                $txt = $tmp . '/out_' . basename($img, '.png') . '.txt';
+                $out[$n] = is_file($txt) ? trim((string) file_get_contents($txt)) : '';
+            }
+        } finally {
+            foreach (glob($tmp . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($tmp);
+        }
+
+        return $out;
+    }
+
     private function pdfPageCount(string $absolutePath): int
     {
         if (! $this->binaryExists('pdfinfo')) {

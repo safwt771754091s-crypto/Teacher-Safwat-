@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Attempt;
+use App\Models\BookProcessingJob;
 use App\Models\Exercise;
 use App\Models\Lesson;
 use App\Models\Subject;
@@ -12,7 +13,9 @@ use App\Models\Textbook;
 use App\Models\TextbookPage;
 use App\Models\User;
 use App\Services\AiTeacherService;
+use App\Services\BookPipelineService;
 use App\Services\ContentExtractionService;
+use App\Services\CrawleeDiscoveryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,6 +24,8 @@ class TeacherController extends Controller
     public function __construct(
         private ContentExtractionService $extractor,
         private AiTeacherService $ai,
+        private BookPipelineService $pipeline,
+        private CrawleeDiscoveryService $discovery,
     ) {}
 
     /**
@@ -34,6 +39,7 @@ class TeacherController extends Controller
             'term' => ['required', 'in:first,second'],
             'edition' => ['nullable', 'string', 'max:60'],
             'source_type' => ['required', 'in:pdf,images,manual'],
+            'discovery_url' => ['nullable', 'url', 'max:2048'],
         ]);
 
         $textbook = Textbook::create($data + ['status' => 'draft']);
@@ -54,6 +60,7 @@ class TeacherController extends Controller
             'publisher' => ['nullable', 'string', 'max:120'],
             'authority' => ['sometimes', 'required', 'in:common,sanaa,aden'],
             'branch' => ['sometimes', 'required', 'in:general,scientific,literary'],
+            'discovery_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
         ]);
 
         $textbook->update($data);
@@ -71,12 +78,16 @@ class TeacherController extends Controller
             'source_type' => 'pdf',
         ]);
 
-        $pages = $this->extractor->withLocalFile($path, fn ($absolute) => $this->extractor->extractPdf($absolute, $textbook));
-        $textbook->update(['source_type' => 'pdf', 'pages_count' => count($pages)]);
+        // A full book is far too slow for one request, so the upload starts a
+        // resumable job and runs its first slice right away: small books finish
+        // immediately, and large ones keep going as the client polls
+        // /textbooks/{id}/job. Each poll advances exactly one bounded slice.
+        $job = $this->pipeline->advance($this->pipeline->start($textbook));
 
         return response()->json([
             'textbook' => $textbook->fresh(),
-            'pages_extracted' => count($pages),
+            'job' => $job->fresh(),
+            'pages_extracted' => $job->pages_done,
             'needs_review' => true,
         ]);
     }
@@ -339,5 +350,197 @@ class TeacherController extends Controller
         $assignment = $user->teacherAssignments()->create($data);
 
         return response()->json(['assignment' => $assignment], 201);
+    }
+
+    /**
+     * The live processing status of a book, and one more step of work.
+     *
+     * The client polls this: each call advances the pipeline by one bounded slice
+     * (a dozen pages of OCR, or a handful of lessons) and returns the refreshed
+     * progress. That keeps every request short, makes the run resumable after a
+     * restart, and means a slow book simply takes more polls.
+     */
+    public function jobStatus(Textbook $textbook)
+    {
+        $job = BookProcessingJob::firstOrCreate(
+            ['textbook_id' => $textbook->id],
+            ['status' => 'queued', 'stage' => 'في الانتظار', 'started_at' => now()],
+        );
+
+        if (in_array($job->status, BookProcessingJob::ACTIVE, true)) {
+            $job = $this->pipeline->advance($job);
+        }
+
+        return response()->json([
+            'job' => $job->fresh(),
+            'percent' => $job->percent(),
+            'pages' => $this->pipeline->pageStatus($textbook),
+            'lessons' => $textbook->lessons()->count(),
+            'models' => Lesson::where('textbook_id', $textbook->id)
+                ->whereHas('sections', fn ($q) => $q->whereNotNull('visual'))
+                ->count(),
+        ]);
+    }
+
+    /** Start (or resume) processing without re-uploading the PDF. */
+    public function startJob(Textbook $textbook)
+    {
+        $job = $this->pipeline->start($textbook);
+
+        return response()->json(['job' => $job->fresh(), 'percent' => $job->percent()]);
+    }
+
+    /**
+     * The generated models of a book, for quality review before publishing.
+     * Every model carries the textbook page and sentence it was built from, so a
+     * reviewer can check it against the source rather than trusting it blindly.
+     */
+    public function reviewModels(Textbook $textbook)
+    {
+        $lessons = $textbook->lessons()
+            ->with(['sections' => fn ($q) => $q->whereNotNull('visual')])
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn ($lesson) => [
+                'id' => $lesson->id,
+                'title' => $lesson->title,
+                'page_from' => $lesson->page_from,
+                'page_to' => $lesson->page_to,
+                'status' => $lesson->status,
+                'models' => $lesson->sections->map(fn ($s) => [
+                    'section_id' => $s->id,
+                    'kind' => $s->visual['kind'] ?? null,
+                    // params let the reviewer render the exact model the student
+                    // would see, rather than approving a description of it.
+                    'params' => $s->visual['params'] ?? [],
+                    'prompt' => $s->visual['prompt'] ?? null,
+                    'source_page' => $s->visual['source_page'] ?? $s->source_page,
+                    'content' => $s->content,
+                ])->values(),
+            ]);
+
+        return response()->json([
+            'textbook' => ['id' => $textbook->id, 'title' => $textbook->title, 'status' => $textbook->status],
+            'lessons' => $lessons,
+        ]);
+    }
+
+    /**
+     * Approve a book's generated models and publish its lessons to students.
+     * Publishing is deliberately a separate, explicit step: nothing a machine
+     * generated reaches a learner until a human has approved it.
+     */
+    public function approveModels(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'lesson_ids' => ['nullable', 'array'],
+            'lesson_ids.*' => ['integer', 'exists:lessons,id'],
+        ]);
+
+        // Approving a subset publishes only those lessons; otherwise the whole
+        // book is published.
+        if (! empty($data['lesson_ids'])) {
+            Lesson::where('textbook_id', $textbook->id)
+                ->whereIn('id', $data['lesson_ids'])
+                ->update(['status' => 'published']);
+            $textbook->update(['status' => 'published']);
+
+            return response()->json(['published' => count($data['lesson_ids'])]);
+        }
+
+        $job = $this->pipeline->approve($textbook, $request->user()?->name);
+
+        return response()->json(['job' => $job, 'published' => $textbook->lessons()->count()]);
+    }
+
+    /**
+     * Where a book's source stands: its index page, the PDF chosen, and any
+     * candidate links already discovered. The console renders this so a reviewer
+     * can see, without re-crawling, what the helper found for the book.
+     */
+    public function sourceStatus(Textbook $textbook)
+    {
+        return response()->json([
+            'textbook' => [
+                'id' => $textbook->id,
+                'title' => $textbook->title,
+                'file_path' => $textbook->file_path,
+                'source_url' => $textbook->source_url,
+                'discovery_url' => $textbook->discovery_url,
+            ],
+            'candidates' => (array) ($textbook->source_candidates ?? []),
+            'crawlee_available' => $this->discovery->available(),
+        ]);
+    }
+
+    /**
+     * Crawl the book's index page with the Crawlee helper and store the links it
+     * found. Discovery only *proposes* files; it never attaches one by itself, so
+     * a reviewer decides which edition is the right source.
+     */
+    public function discoverSource(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'discovery_url' => ['nullable', 'url', 'max:2048'],
+            'max_pages' => ['nullable', 'integer', 'min:1', 'max:5'],
+        ]);
+
+        $url = $data['discovery_url'] ?? $textbook->discovery_url;
+        if (! $url) {
+            return response()->json(['message' => 'حدّد رابط صفحة الفهرس أولًا.'], 422);
+        }
+
+        $result = $this->discovery->discoverFor($textbook, $url, (int) ($data['max_pages'] ?? 2));
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error'] ?? 'لم يُعثر على روابط.'], 422);
+        }
+
+        return response()->json([
+            'textbook' => $textbook->fresh(),
+            'candidates' => $result['links'],
+        ]);
+    }
+
+    /**
+     * Attach a chosen candidate (or the best PDF the helper found) as the book's
+     * source, then restart its processing so the pipeline extracts it. Attaching
+     * clears any earlier pages so a stale extraction cannot be mixed with a new
+     * source, which is why it is an explicit, deliberate action.
+     */
+    public function attachSource(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'url' => ['nullable', 'url', 'max:2048'],
+        ]);
+
+        $url = $data['url'] ?? null;
+        if ($url === null) {
+            $candidates = (array) ($textbook->source_candidates ?? []);
+            if ($candidates === [] && $textbook->discovery_url) {
+                $found = $this->discovery->discoverFor($textbook);
+                $candidates = $found['links'] ?? [];
+            }
+            $url = $this->discovery->bestPdfCandidate($candidates)['url'] ?? null;
+        }
+
+        if (! $url) {
+            return response()->json(['message' => 'لا يوجد ملف PDF لاعتماده كمصدر.'], 422);
+        }
+
+        // A new source invalidates the old extraction; keep lessons that a human
+        // authored (published), drop machine drafts so they are rebuilt cleanly.
+        $textbook->pages()->delete();
+        $textbook->lessons()->where('status', '!=', 'published')->delete();
+
+        $textbook->forceFill([
+            'source_url' => $url,
+            'pages_count' => 0,
+            'status' => 'draft',
+        ])->save();
+
+        BookProcessingJob::where('textbook_id', $textbook->id)->delete();
+        $job = $this->pipeline->advance($this->pipeline->start($textbook));
+
+        return response()->json(['textbook' => $textbook->fresh(), 'job' => $job->fresh()]);
     }
 }
