@@ -20,6 +20,10 @@ class AiTeacherTest extends TestCase
         $student = User::where('email', 'student@school.ye')->first();
         $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
 
+        // No LLM: the platform composes the explanation from the lesson source
+        // itself, so the test is deterministic and needs no network.
+        config(['platform.ai.provider' => 'none']);
+
         $res = $this->actingAs($student, 'sanctum')
             ->postJson("/api/v1/lessons/{$lesson->id}/explain", [])
             ->assertOk();
@@ -42,6 +46,8 @@ class AiTeacherTest extends TestCase
         $lesson->sections()->delete();
         $lesson->summaries()->delete();
 
+        config(['platform.ai.provider' => 'none']);
+
         $res = $this->actingAs($student, 'sanctum')
             ->postJson("/api/v1/lessons/{$lesson->id}/explain", [])
             ->assertOk();
@@ -54,6 +60,7 @@ class AiTeacherTest extends TestCase
     {
         $student = User::where('email', 'student@school.ye')->first();
         $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
+        config(['platform.ai.provider' => 'none']);
         $res = $this->actingAs($student, 'sanctum')
             ->postJson("/api/v1/lessons/{$lesson->id}/ask", ['question' => 'ما علامة الجمع؟'])
             ->assertOk();
@@ -94,6 +101,14 @@ class AiTeacherTest extends TestCase
             ->getJson("/api/v1/lessons/{$lesson->id}/summary")
             ->assertOk()
             ->assertJsonStructure(['summary' => ['points', 'source_pages']]);
+    }
+
+    public function test_the_free_keyless_provider_is_the_default(): void
+    {
+        // Out of the box (no env, no owner setting) the teacher must work with no
+        // signup and no credit card, so the default provider is the keyless one.
+        $this->assertSame('pollinations', config('platform.ai.provider'));
+        $this->assertContains(config('platform.ai.provider'), config('platform.ai.keyless'));
     }
 
     public function test_a_keyless_provider_answers_without_an_api_key(): void

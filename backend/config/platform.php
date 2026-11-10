@@ -64,9 +64,13 @@ return [
     | content directly, so nothing is ever invented.
     */
     'ai' => [
-        'provider' => env('LLM_PROVIDER', 'none'), // none|openai|gemini
+        // The platform must answer the teacher out of the box with no signup and
+        // no credit card, so the free keyless provider is the default. An owner
+        // can switch to a paid provider (and its key) from the console at any
+        // time; that saved choice always wins over this default.
+        'provider' => env('LLM_PROVIDER', 'pollinations'), // none|pollinations|openai|gemini
         'api_key' => env('LLM_API_KEY'),
-        'model' => env('LLM_MODEL', 'gpt-4o-mini'),
+        'model' => env('LLM_MODEL', 'openai'),
         'base_url' => env('LLM_BASE_URL', 'https://api.openai.com/v1'),
         'timeout' => (int) env('LLM_TIMEOUT', 30),
         // Free tiers answer at a limited rate; retry rather than fail the run.
