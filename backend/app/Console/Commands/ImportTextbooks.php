@@ -40,6 +40,9 @@ class ImportTextbooks extends Command
     /** Wall-clock start, used to honour --max-seconds. */
     private float $startedAt = 0.0;
 
+    /** Set when the run stopped mid-book, so the resume offset is not advanced. */
+    private bool $consumedBack = false;
+
     /**
      * Manifest subject name => the canonical subject name seeded for the grade.
      * Used only to avoid duplicate subjects; an unknown name is created as-is.
@@ -129,13 +132,15 @@ class ImportTextbooks extends Command
                 continue;
             }
 
-            // Resume: skip only books whose pages hold *readable* text. A scanned
-            // book (or one left with font-mojibake) must be retried so OCR fills
-            // it in, so a plain non-empty count is not enough.
+            // Resume: skip only books that are BOTH fully stored and readable.
+            // A scanned book (or one left with font-mojibake) must be retried so
+            // OCR fills it in, and a partially-extracted book (a batch that ran
+            // out of time) must continue from where it stopped.
             $pages = $textbook->pages()->pluck('extracted_text');
             $readable = $pages->filter(fn ($t) => $extractor->textIsReadable((string) $t))->count();
+            $stored = $pages->count();
             $total = max(1, (int) $textbook->pages_count);
-            if (! $this->option('force') && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
+            if (! $this->option('force') && $stored >= $total && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
                 $say('↷ already ingested: '.$textbook->title);
                 $done++;
                 $skipped++;
@@ -144,7 +149,8 @@ class ImportTextbooks extends Command
             }
 
             $say('▶ '.$entry['title']);
-            $file = $this->download($entry['url'], $dir, 2);
+            $remaining = $maxSeconds > 0 ? $maxSeconds - (microtime(true) - $this->startedAt) : 0;
+            $file = $this->download($entry['url'], $dir, 2, $remaining);
             if (! $file) {
                 if (! $json) {
                     $this->error('  download failed');
@@ -154,8 +160,31 @@ class ImportTextbooks extends Command
                 continue;
             }
 
+            // Extract in page slices, checking the wall-clock budget between
+            // slices: a long scanned book then returns in time and the next call
+            // resumes exactly where this one stopped (pages are upserted).
+            $page = $this->resumePage($textbook, $extractor);
+            $withText = 0;
+            $slice = 12;
+            $partial = false;
+            $total = max(1, (int) $textbook->pages_count);
             try {
-                $pages = $extractor->extractPdf($file, $textbook);
+                while (true) {
+                    $pages = $extractor->extractPdfRange($textbook, $page, $slice, $file);
+                    $total = (int) $pages['pages_total'];
+                    if ($total === 0 || $pages['processed'] === 0) {
+                        break;
+                    }
+                    $page += $slice;
+                    if ($page > $total) {
+                        break;
+                    }
+                    if ($maxSeconds > 0 && (microtime(true) - $this->startedAt) >= $maxSeconds) {
+                        $partial = true;
+                        break;
+                    }
+                }
+                $withText = $textbook->pages()->whereRaw('LENGTH(extracted_text) > 0')->count();
             } catch (\Throwable $e) {
                 if (! $json) {
                     $this->error('  extraction failed: '.$e->getMessage());
@@ -168,8 +197,20 @@ class ImportTextbooks extends Command
                 continue;
             }
 
-            $withText = collect($pages)->filter(fn ($p) => $p['text'] !== '')->count();
-            $say("  {$textbook->title}: ".count($pages)." pages ({$withText} with text)");
+            if ($partial) {
+                // Stop here: do not advance past this book, so the next call
+                // retries it and continues from the last stored page (pages are
+                // upserted, so nothing is redone).
+                if (! $this->option('keep-files')) {
+                    @unlink($file);
+                }
+                $this->consumedBack = true;
+                $timedOut = true;
+                $say("  {$textbook->title}: partial ({$page}/{$total} pages so far) — will resume");
+                break;
+            }
+
+            $say("  {$textbook->title}: {$total} pages ({$withText} with text)");
 
             if ($this->option('draft-lessons')) {
                 $created = $extractor->draftLessonsFromPages($textbook);
@@ -182,6 +223,9 @@ class ImportTextbooks extends Command
             $done++;
         }
 
+        if ($this->consumedBack) {
+            $consumed = max(0, $consumed - 1);
+        }
         $nextOffset = $offset + $consumed;
 
         if ($json) {
@@ -276,7 +320,21 @@ class ImportTextbooks extends Command
         return trim($name);
     }
 
-    private function download(string $url, string $dir, int $attempts = 1): ?string
+    /** The next page to extract, so a batch that ran out of time resumes here. */
+    private function resumePage(Textbook $textbook, ContentExtractionService $extractor): int
+    {
+        $pages = $textbook->pages()->orderBy('page_number')->get(['page_number', 'extracted_text']);
+        $next = 1;
+        foreach ($pages as $p) {
+            if ($extractor->textIsReadable((string) $p->extracted_text)) {
+                $next = max($next, (int) $p->page_number + 1);
+            }
+        }
+
+        return $next;
+    }
+
+    private function download(string $url, string $dir, int $attempts = 1, float $budgetSeconds = 0): ?string
     {
         $file = $dir.'/'.substr(sha1($url), 0, 12).'.pdf';
         // The official host serves the PDF only when the request looks like it
@@ -285,9 +343,13 @@ class ImportTextbooks extends Command
         // book is silently never ingested.
         $url = $this->normalizeDownloadUrl($url);
         $referer = 'https://www.yemenbooks.com/';
+        // Never outlive the batch budget: a slow host must not hold a web request
+        // open past its limit, or the caller times out and the book never lands.
+        $maxTime = $budgetSeconds > 0 ? max(30, min(900, (int) $budgetSeconds)) : 900;
         for ($i = 0; $i < $attempts; $i++) {
             @shell_exec(sprintf(
-                'curl -sL --fail --max-time 900 --retry 2 -e %s -o %s %s',
+                'curl -sL --fail --max-time %d --retry 2 -e %s -o %s %s',
+                $maxTime,
                 escapeshellarg($referer),
                 escapeshellarg($file),
                 escapeshellarg($url),

@@ -85,7 +85,7 @@ class ContentExtractionService
      *
      * @return array{pages_total:int,processed:int,ocr_pages:int}
      */
-    public function extractPdfRange(Textbook $textbook, int $from, int $limit): array
+    public function extractPdfRange(Textbook $textbook, int $from, int $limit, ?string $localPath = null): array
     {
         $from = max(1, $from);
         $limit = max(1, $limit);
@@ -136,6 +136,13 @@ class ContentExtractionService
 
             return ['pages_total' => $pagesTotal, 'processed' => $processed, 'ocr_pages' => $ocrPages];
         };
+
+        // A caller that already downloaded the file (the batch importer) passes
+        // it here so the PDF is fetched once and sliced, never re-downloaded per
+        // slice.
+        if ($localPath !== null && is_file($localPath)) {
+            return $run($localPath);
+        }
 
         if ($textbook->file_path) {
             return $this->withLocalFile($textbook->file_path, $run) ?? $empty;

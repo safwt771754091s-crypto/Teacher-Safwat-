@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Console\Commands\ImportTextbooks;
+use App\Models\Subject;
 use App\Models\User;
+use App\Services\ContentExtractionService;
 use App\Services\TextbookImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use ReflectionMethod;
@@ -77,6 +79,26 @@ class TextbookImportTest extends TestCase
         $this->assertSame('aden', config('platform.curriculum.authority'));
         $this->assertSame('aden', TextbookImportService::defaultManifest());
         $this->assertFileExists(base_path(TextbookImportService::MANIFESTS['aden']));
+    }
+
+    public function test_a_batch_that_runs_out_of_time_resumes_without_advancing(): void
+    {
+        // A book that needs more than the batch budget must not be skipped on
+        // the next call: the resume offset stays put, the page slice continues
+        // from where it stopped, and nothing already stored is redone.
+        $textbook = Subject::query()->firstOrFail()->textbooks()->create([
+            'title' => 'كتاب جزئي', 'term' => 'first', 'source_type' => 'pdf', 'pages_count' => 40,
+        ]);
+        foreach (range(1, 24) as $n) {
+            $textbook->pages()->create(['page_number' => $n, 'extracted_text' => str_repeat('نص مقروء واضح. ', 20)]);
+        }
+
+        $command = app(ImportTextbooks::class);
+        $method = new ReflectionMethod($command, 'resumePage');
+        $method->setAccessible(true);
+        $extractor = app(ContentExtractionService::class);
+
+        $this->assertSame(25, $method->invoke($command, $textbook, $extractor));
     }
 
     public function test_the_reader_endpoint_url_is_normalized_to_serve_the_file(): void
