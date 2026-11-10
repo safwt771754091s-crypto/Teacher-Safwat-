@@ -1,0 +1,100 @@
+name: Ops — bulk import textbooks (live DB)
+
+# Manual, one-off operation: download and ingest official textbook PDFs into the
+# LIVE production database with the same command the app ships with
+# (`textbooks:import`). It never runs on a schedule and never touches the DB
+# unless explicitly dispatched with dry_run=false.
+#
+# Requires the same `DB_URL` secret the Render service uses. When that secret is
+# absent the recon job says so and the import job is skipped.
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: 'Manifest path (relative to backend/)'
+        required: true
+        default: 'database/data/yemen_books_all.json'
+      grade:
+        description: 'Only this grade level (blank = all)'
+        required: false
+        default: ''
+      limit:
+        description: 'Max books this run (0 = all)'
+        required: true
+        default: '3'
+      dry_run:
+        description: 'Recon only — do not touch the database (true/false)'
+        required: true
+        default: 'true'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-import-books
+  cancel-in-progress: false
+
+jobs:
+  recon:
+    name: Recon — is a live DB configured?
+    runs-on: ubuntu-latest
+    outputs:
+      has_db: ${{ steps.check.outputs.has_db }}
+    steps:
+      - name: Report whether the DB_URL secret is present
+        id: check
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          if [ -n "$DB_URL" ]; then
+            echo "DB_URL: present (len ${#DB_URL})"
+            echo "has_db=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "DB_URL: ABSENT — bulk import cannot reach the live database."
+            echo "has_db=no" >> "$GITHUB_OUTPUT"
+          fi
+
+  import:
+    name: Import books into the live DB
+    runs-on: ubuntu-latest
+    needs: recon
+    if: ${{ needs.recon.outputs.has_db == 'yes' && inputs.dry_run != 'true' }}
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DB_CONNECTION: pgsql
+      DB_SSLMODE: require
+      DB_DATABASE: postgres
+      DB_URL: ${{ secrets.DB_URL }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, pdo_sqlite, mbstring, bcmath, gd, intl, zip, xml
+          coverage: none
+
+      - name: Install OCR + PDF tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils ghostscript tesseract-ocr tesseract-ocr-ara
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare env
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Migrate the live database
+        run: php artisan migrate --force
+
+      - name: Import textbooks
+        run: |
+          ARGS="${{ inputs.manifest }} --limit=${{ inputs.limit }}"
+          if [ -n "${{ inputs.grade }}" ]; then ARGS="$ARGS --grade=${{ inputs.grade }}"; fi
+          php artisan textbooks:import $ARGS
