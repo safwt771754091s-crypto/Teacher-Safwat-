@@ -1,0 +1,123 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Console\Commands\ImportTextbooks;
+use App\Models\User;
+use App\Services\TextbookImportService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use ReflectionMethod;
+use Tests\TestCase;
+
+/**
+ * The owner console ingests the official book PDFs itself, in bounded batches,
+ * so the whole catalogue can be loaded without a manual upload per book. These
+ * tests lock the access rules and the batch/JSON contract (no network needed).
+ */
+class TextbookImportTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected bool $seed = true;
+
+    private function owner(): User
+    {
+        return User::where('email', 'owner@school.ye')->firstOrFail();
+    }
+
+    public function test_student_cannot_import_or_read_coverage(): void
+    {
+        $student = User::where('email', 'student@school.ye')->firstOrFail();
+
+        $this->actingAs($student, 'sanctum')
+            ->postJson('/api/v1/owner/textbooks/import', ['manifest' => 'all'])
+            ->assertStatus(403);
+
+        $this->actingAs($student, 'sanctum')
+            ->getJson('/api/v1/owner/textbooks/coverage')
+            ->assertStatus(403);
+    }
+
+    public function test_coverage_reports_ready_and_pending_books(): void
+    {
+        $this->actingAs($this->owner(), 'sanctum')
+            ->getJson('/api/v1/owner/textbooks/coverage')
+            ->assertOk()
+            ->assertJsonStructure(['books', 'ready', 'pending', 'items'])
+            ->assertJsonPath('items.0.ready', false);
+    }
+
+    public function test_import_rejects_unknown_manifest(): void
+    {
+        $this->actingAs($this->owner(), 'sanctum')
+            ->postJson('/api/v1/owner/textbooks/import', ['manifest' => 'nowhere'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('manifest');
+    }
+
+    public function test_import_command_emits_a_json_batch_summary(): void
+    {
+        // Drive the command through the same service the owner endpoint uses,
+        // and read the JSON batch summary it produces. A grade that matches no
+        // manifest entry keeps this offline and fast while exercising the
+        // resume/JSON contract the console relies on.
+        $result = app(TextbookImportService::class)->runBatch('all', 0, 5, 99);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(0, $result['imported']);
+        $this->assertArrayHasKey('next_offset', $result);
+        $this->assertArrayHasKey('timed_out', $result);
+    }
+
+    public function test_the_platform_adopts_the_aden_curriculum_by_default(): void
+    {
+        // The owner asked for a single adopted curriculum: the Aden editions
+        // (plus the shared national "common" books). The import must therefore
+        // default to the Aden manifest, and the learner view to the Aden filter.
+        $this->assertSame('aden', config('platform.curriculum.authority'));
+        $this->assertSame('aden', TextbookImportService::defaultManifest());
+        $this->assertFileExists(base_path(TextbookImportService::MANIFESTS['aden']));
+    }
+
+    public function test_the_reader_endpoint_url_is_normalized_to_serve_the_file(): void
+    {
+        // The official host only returns the PDF from the reader endpoint when
+        // `read=1` is present; without it the request is bounced to the homepage.
+        $command = app(ImportTextbooks::class);
+        $method = new ReflectionMethod($command, 'normalizeDownloadUrl');
+
+        $this->assertSame(
+            'https://s1.yemen-books.com/app/open.php?book=265&read=1',
+            $method->invoke($command, 'https://s1.yemen-books.com/app/open.php?book=265'),
+        );
+
+        // An explicit read flag, or an unrelated host, must be left untouched.
+        $this->assertSame(
+            'https://s1.yemen-books.com/app/open.php?book=265&read=1',
+            $method->invoke($command, 'https://s1.yemen-books.com/app/open.php?book=265&read=1'),
+        );
+        $this->assertSame(
+            'https://example.com/book.pdf',
+            $method->invoke($command, 'https://example.com/book.pdf'),
+        );
+    }
+
+    public function test_a_non_pdf_response_is_not_accepted_as_a_book(): void
+    {
+        // A redirect to an HTML page must never be stored as a "book": the guard
+        // is what turns a silent no-op import into an honest failure.
+        $command = app(ImportTextbooks::class);
+        $method = new ReflectionMethod($command, 'looksLikePdf');
+
+        $pdf = tempnam(sys_get_temp_dir(), 'bk');
+        file_put_contents($pdf, "%PDF-1.7\n...");
+        $html = tempnam(sys_get_temp_dir(), 'bk');
+        file_put_contents($html, '<!DOCTYPE html><html>...');
+
+        $this->assertTrue($method->invoke($command, $pdf));
+        $this->assertFalse($method->invoke($command, $html));
+
+        @unlink($pdf);
+        @unlink($html);
+    }
+}

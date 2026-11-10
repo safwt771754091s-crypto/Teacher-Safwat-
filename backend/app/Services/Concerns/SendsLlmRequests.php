@@ -40,7 +40,13 @@ trait SendsLlmRequests
         $attempts = max(1, (int) config('platform.ai.retries', 3));
 
         for ($attempt = 1; ; $attempt++) {
-            $response = Http::withToken((string) $apiKey)->timeout($timeout)->post($url, $payload);
+            // A keyless provider answers without a key; sending an empty bearer
+            // makes some of them reject the request, so only add it when present.
+            $request = Http::timeout($timeout);
+            if (is_string($apiKey) && trim($apiKey) !== '') {
+                $request = $request->withToken($apiKey);
+            }
+            $response = $request->post($url, $payload);
 
             if ($response->successful() || $attempt >= $attempts) {
                 return $response;

@@ -156,6 +156,9 @@ Route::prefix('v1')->group(function () {
             // Platform report (PDF download).
             Route::get('owner/platform-report', [OwnerController::class, 'platformReport']);
             Route::get('owner/platform-report/download', [OwnerController::class, 'downloadPlatformReport']);
+            // Bulk textbook ingestion (downloads + OCR the official PDFs into this DB).
+            Route::get('owner/textbooks/coverage', [OwnerController::class, 'textbookCoverage']);
+            Route::post('owner/textbooks/import', [OwnerController::class, 'importTextbooks']);
         });
     });
 });

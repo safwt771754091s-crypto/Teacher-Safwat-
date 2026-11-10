@@ -35,9 +35,14 @@ class CurriculumController extends Controller
         if (! $request->boolean('all')) {
             $query->has('lessons');
         }
-        if ($authority = $request->query('authority')) {
+        // Adopt a single curriculum edition by default so the same subject never
+        // shows two versions of the same book. A request may still ask for a
+        // specific authority (e.g. an admin comparing editions).
+        $authority = $request->query('authority') ?: config('platform.curriculum.authority');
+        if ($authority) {
             $query->whereIn('authority', [$authority, 'common']);
         }
+
         return response()->json([
             'textbooks' => $query->get(),
             'authorities' => Textbook::AUTHORITIES,
@@ -54,6 +59,7 @@ class CurriculumController extends Controller
             $query->where('status', 'published');
         }
         $lessons = $query->get(['id', 'title', 'page_from', 'page_to', 'sort_order', 'status']);
+
         return response()->json([
             'textbook' => $textbook->only(['id', 'title', 'term', 'status', 'pages_count', 'authority', 'branch']),
             'lessons' => $lessons,
@@ -63,6 +69,7 @@ class CurriculumController extends Controller
     public function lesson(Lesson $lesson)
     {
         $lesson->load(['sections', 'exercises.options', 'approvedSummary', 'textbook.subject.grade']);
+
         return response()->json(['lesson' => $lesson]);
     }
 
@@ -147,7 +154,7 @@ class CurriculumController extends Controller
         if ($format === 'html') {
             return response($htmlFactory(), 200, [
                 'Content-Type' => 'text/html; charset=utf-8',
-                'Content-Disposition' => 'attachment; filename="book.html"; filename*=UTF-8\'\'' . rawurlencode($safe . '.html'),
+                'Content-Disposition' => 'attachment; filename="book.html"; filename*=UTF-8\'\''.rawurlencode($safe.'.html'),
             ]);
         }
 
@@ -155,7 +162,7 @@ class CurriculumController extends Controller
 
         return response($bytes, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="book.pdf"; filename*=UTF-8\'\'' . rawurlencode($safe . '.pdf'),
+            'Content-Disposition' => 'attachment; filename="book.pdf"; filename*=UTF-8\'\''.rawurlencode($safe.'.pdf'),
         ]);
     }
 }

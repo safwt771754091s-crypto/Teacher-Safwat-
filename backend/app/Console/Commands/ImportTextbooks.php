@@ -28,12 +28,17 @@ class ImportTextbooks extends Command
         {--no-ocr : Disable OCR (text layer only)}
         {--draft-lessons : Draft lessons after extraction}
         {--keep-files : Keep the downloaded PDFs}
+        {--max-seconds=0 : Stop gracefully after this many seconds (0 = no limit)}
+        {--json : Emit a single JSON summary instead of human output}
         {--force : Re-extract even when the book already has readable text}';
 
     protected $description = 'Download and ingest a manifest of official Yemeni textbook PDFs';
 
     /** @var list<string> */
     private array $failures = [];
+
+    /** Wall-clock start, used to honour --max-seconds. */
+    private float $startedAt = 0.0;
 
     /**
      * Manifest subject name => the canonical subject name seeded for the grade.
@@ -55,8 +60,14 @@ class ImportTextbooks extends Command
         $manifest = json_decode((string) file_get_contents((string) $this->argument('manifest')), true);
         if (! is_array($manifest)) {
             $this->error('Invalid manifest JSON.');
+
             return self::FAILURE;
         }
+
+        $this->startedAt = microtime(true);
+        $json = (bool) $this->option('json');
+        $maxSeconds = (int) $this->option('max-seconds');
+        $say = fn (string $msg) => $json ? null : $this->line($msg);
 
         if ($this->option('no-ocr')) {
             config(['platform.ocr.enabled' => false]);
@@ -68,6 +79,8 @@ class ImportTextbooks extends Command
         @mkdir($dir, 0775, true);
 
         $done = 0;
+        $skipped = 0;
+        $timedOut = false;
         $onlyAuthority = $this->option('authority');
         if ($tagAuthority = $this->option('tag-authority')) {
             foreach ($manifest as &$entry) {
@@ -78,7 +91,8 @@ class ImportTextbooks extends Command
 
         $offset = max(0, (int) $this->option('offset'));
         $count = max(0, (int) $this->option('count'));
-        $seen = 0;
+        $seen = 0;      // entries passing filters (for --offset)
+        $consumed = 0;  // entries this run examined (for the resume offset)
         $taken = 0;
 
         foreach ($manifest as $entry) {
@@ -96,14 +110,22 @@ class ImportTextbooks extends Command
             if ($count && $taken >= $count) {
                 break;
             }
+            // Stop before starting a new (slow) book once the budget is spent,
+            // so a web-triggered run always returns in time and can resume.
+            if ($maxSeconds > 0 && (microtime(true) - $this->startedAt) >= $maxSeconds) {
+                $timedOut = true;
+                break;
+            }
             $taken++;
+            $consumed++;
             if ($limit && $done >= $limit) {
                 break;
             }
 
             $textbook = $this->upsertTextbook($entry);
             if (! $textbook) {
-                $this->warn('Skip (no matching subject): ' . ($entry['title'] ?? '?'));
+                $say('Skip (no matching subject): '.($entry['title'] ?? '?'));
+
                 continue;
             }
 
@@ -114,36 +136,44 @@ class ImportTextbooks extends Command
             $readable = $pages->filter(fn ($t) => $extractor->textIsReadable((string) $t))->count();
             $total = max(1, (int) $textbook->pages_count);
             if (! $this->option('force') && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
-                $this->line('↷ already ingested: ' . $textbook->title);
+                $say('↷ already ingested: '.$textbook->title);
                 $done++;
+                $skipped++;
+
                 continue;
             }
 
-            $this->line('▶ ' . $entry['title']);
+            $say('▶ '.$entry['title']);
             $file = $this->download($entry['url'], $dir, 2);
             if (! $file) {
-                $this->error('  download failed');
+                if (! $json) {
+                    $this->error('  download failed');
+                }
                 $this->failures[] = $entry['url'];
+
                 continue;
             }
 
             try {
                 $pages = $extractor->extractPdf($file, $textbook);
             } catch (\Throwable $e) {
-                $this->error('  extraction failed: ' . $e->getMessage());
+                if (! $json) {
+                    $this->error('  extraction failed: '.$e->getMessage());
+                }
                 $this->failures[] = $entry['url'];
                 if (! $this->option('keep-files')) {
                     @unlink($file);
                 }
+
                 continue;
             }
 
             $withText = collect($pages)->filter(fn ($p) => $p['text'] !== '')->count();
-            $this->info("  {$textbook->title}: " . count($pages) . " pages ({$withText} with text)");
+            $say("  {$textbook->title}: ".count($pages)." pages ({$withText} with text)");
 
             if ($this->option('draft-lessons')) {
                 $created = $extractor->draftLessonsFromPages($textbook);
-                $this->info("  drafted {$created} lessons");
+                $say("  drafted {$created} lessons");
             }
 
             if (! $this->option('keep-files')) {
@@ -152,13 +182,30 @@ class ImportTextbooks extends Command
             $done++;
         }
 
-        $this->info("Imported {$done} textbook(s).");
-        if ($this->failures) {
-            $this->warn('Failed (' . count($this->failures) . '):');
-            foreach ($this->failures as $url) {
-                $this->warn('  ' . $url);
+        $nextOffset = $offset + $consumed;
+
+        if ($json) {
+            $this->line(json_encode([
+                'ok' => true,
+                'imported' => $done,
+                'skipped' => $skipped,
+                'failed' => count($this->failures),
+                'failures' => $this->failures,
+                'offset' => $offset,
+                'next_offset' => $nextOffset,
+                'consumed' => $consumed,
+                'timed_out' => $timedOut,
+            ], JSON_UNESCAPED_UNICODE));
+        } else {
+            $this->info("Imported {$done} textbook(s).");
+            if ($this->failures) {
+                $this->warn('Failed ('.count($this->failures).'):');
+                foreach ($this->failures as $url) {
+                    $this->warn('  '.$url);
+                }
             }
         }
+
         return self::SUCCESS;
     }
 
@@ -231,17 +278,54 @@ class ImportTextbooks extends Command
 
     private function download(string $url, string $dir, int $attempts = 1): ?string
     {
-        $file = $dir . '/' . substr(sha1($url), 0, 12) . '.pdf';
+        $file = $dir.'/'.substr(sha1($url), 0, 12).'.pdf';
+        // The official host serves the PDF only when the request looks like it
+        // came from its own download page; without the referer it bounces us to
+        // the homepage, so a naive download "succeeds" with an HTML file and the
+        // book is silently never ingested.
+        $url = $this->normalizeDownloadUrl($url);
+        $referer = 'https://www.yemenbooks.com/';
         for ($i = 0; $i < $attempts; $i++) {
             @shell_exec(sprintf(
-                'curl -sL --fail --max-time 900 --retry 2 -o %s %s',
+                'curl -sL --fail --max-time 900 --retry 2 -e %s -o %s %s',
+                escapeshellarg($referer),
                 escapeshellarg($file),
                 escapeshellarg($url),
             ));
-            if (is_file($file) && filesize($file) > 1024) {
+            if (is_file($file) && filesize($file) > 1024 && $this->looksLikePdf($file)) {
                 return $file;
             }
         }
+        @unlink($file);
+
         return null;
+    }
+
+    /** The reader endpoint only returns the file when `read=1` is present. */
+    private function normalizeDownloadUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if (($parts['host'] ?? '') === 's1.yemen-books.com' && ($parts['path'] ?? '') === '/app/open.php') {
+            parse_str($parts['query'] ?? '', $q);
+            if (! isset($q['read'])) {
+                $q['read'] = '1';
+                $url = 'https://s1.yemen-books.com/app/open.php?'.http_build_query($q);
+            }
+        }
+
+        return $url;
+    }
+
+    /** Guard against a redirect to an HTML page being stored as a "PDF". */
+    private function looksLikePdf(string $file): bool
+    {
+        $fh = @fopen($file, 'rb');
+        if (! $fh) {
+            return false;
+        }
+        $head = (string) fread($fh, 5);
+        fclose($fh);
+
+        return str_starts_with($head, '%PDF');
     }
 }

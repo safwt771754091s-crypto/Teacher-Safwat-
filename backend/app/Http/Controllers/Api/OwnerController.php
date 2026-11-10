@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\DatabaseSnapshotService;
 use App\Services\LlmKeyValidator;
 use App\Services\PlatformReportService;
+use App\Services\TextbookImportService;
 use Illuminate\Http\Request;
 use Throwable;
 
@@ -237,5 +238,43 @@ class OwnerController extends Controller
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="report.pdf"; filename*=UTF-8\'\''.rawurlencode($name.'.pdf'),
         ]);
+    }
+
+    // ---------------- Textbook ingestion ----------------
+
+    /** Which books already have real extracted text, and which still need it. */
+    public function textbookCoverage(Request $request, TextbookImportService $import)
+    {
+        $grade = $request->filled('grade') ? (int) $request->integer('grade') : null;
+
+        return response()->json($import->coverage($grade));
+    }
+
+    /**
+     * Import one bounded batch of books into this (server-side) database.
+     *
+     * The owner console calls this repeatedly, advancing `offset` by the
+     * returned `next_offset`, until `timed_out` is false — so the whole
+     * catalogue is ingested without a single long-lived request.
+     */
+    public function importTextbooks(Request $request, TextbookImportService $import)
+    {
+        $data = $request->validate([
+            'manifest' => ['nullable', 'in:all,aden,sanaa'],
+            'offset' => ['nullable', 'integer', 'min:0'],
+            'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'max_seconds' => ['nullable', 'integer', 'min:5', 'max:120'],
+            'force' => ['nullable', 'boolean'],
+        ]);
+
+        $result = $import->runBatch(
+            $data['manifest'] ?? TextbookImportService::defaultManifest(),
+            (int) ($data['offset'] ?? 0),
+            (int) ($data['max_seconds'] ?? 25),
+            isset($data['grade']) ? (int) $data['grade'] : null,
+            (bool) ($data['force'] ?? false),
+        );
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
     }
 }

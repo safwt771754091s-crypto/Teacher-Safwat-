@@ -150,7 +150,7 @@ class AiTeacherService
         return $out;
     }
 
-    private function explainWithLlm(Lesson $lesson, array $ctx, ?string $question, ?User $user, int $readingAge, string $provider, string $apiKey): array
+    private function explainWithLlm(Lesson $lesson, array $ctx, ?string $question, ?User $user, int $readingAge, string $provider, ?string $apiKey): array
     {
         $system = "أنت معلم يمني صبور يشرح لطالب في المرحلة الابتدائية.\n"
             . "قاعدة صارمة: اشرح فقط من (محتوى الدرس) المرفق من كتاب المنهج اليمني. "
@@ -187,7 +187,7 @@ class AiTeacherService
      * on failure. Usage is always logged. Kept in one place so every AI feature
      * shares the same provider, timeout, and audit trail.
      */
-    private function callLlm(string $provider, string $apiKey, string $system, string $userMsg, ?User $user, Lesson $lesson, string $feature): ?string
+    private function callLlm(string $provider, ?string $apiKey, string $system, string $userMsg, ?User $user, Lesson $lesson, string $feature): ?string
     {
         try {
             $response = $this->postChat([

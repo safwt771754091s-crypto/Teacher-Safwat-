@@ -108,6 +108,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Adopted curriculum (authority)
+    |--------------------------------------------------------------------------
+    | Which Yemeni curriculum edition the platform teaches. The platform adopts
+    | ONE authority so a student is never shown two versions of the same book:
+    | by default the Aden editions (وزارة التربية والتعليم - عدن), plus the
+    | "common" national books that both authorities share. Set
+    | CURRICULUM_AUTHORITY=sanaa (or common) to switch the whole platform.
+    */
+    'curriculum' => [
+        'authority' => env('CURRICULUM_AUTHORITY', 'aden'),
+        'authorities' => ['common' => 'مشترك', 'aden' => 'عدن', 'sanaa' => 'صنعاء'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Optional content-discovery helper (Crawlee)
     |--------------------------------------------------------------------------
     | tools/crawlee_service/crawl_books.py can look up official PDF editions from

@@ -70,10 +70,20 @@ class CurriculumTest extends TestCase
         $all = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks")->assertOk();
         $this->assertArrayHasKey('authorities', $all->json());
 
+        // The platform adopts one authority by default (Aden + the shared
+        // national "common" books), so the Sanaa edition is not shown unless it
+        // is asked for explicitly.
+        $defaultTitles = collect($all->json('textbooks'))->pluck('title');
+        $this->assertTrue($defaultTitles->contains('كتاب منهج عدن'));
+        $this->assertFalse($defaultTitles->contains('كتاب منهج صنعاء'));
+
         $aden = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks?authority=aden")->assertOk();
         $titles = collect($aden->json('textbooks'))->pluck('title');
         $this->assertTrue($titles->contains('كتاب منهج عدن'));
         $this->assertFalse($titles->contains('كتاب منهج صنعاء'));
+
+        $sanaa = $this->getJson("/api/v1/subjects/{$subject->id}/textbooks?authority=sanaa")->assertOk();
+        $this->assertTrue(collect($sanaa->json('textbooks'))->pluck('title')->contains('كتاب منهج صنعاء'));
 
         // A catalogue-only book (no lessons) must not be listed to learners, but
         // stays available to admins via ?all=1.

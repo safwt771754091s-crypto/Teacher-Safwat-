@@ -95,4 +95,31 @@ class AiTeacherTest extends TestCase
             ->assertOk()
             ->assertJsonStructure(['summary' => ['points', 'source_pages']]);
     }
+
+    public function test_a_keyless_provider_answers_without_an_api_key(): void
+    {
+        // The free provider answers with no key at all. The teacher must reach it
+        // with an empty key instead of crashing on a null: a keyless provider is
+        // exactly the path an owner uses to switch the teacher on for free.
+        $student = User::where('email', 'student@school.ye')->first();
+        $lesson = Lesson::where('title', 'الجمع حتى ١٠')->firstOrFail();
+
+        config([
+            'platform.ai.provider' => 'pollinations',
+            'platform.ai.base_url' => 'https://text.pollinations.ai/openai',
+            'platform.ai.model' => 'openai',
+            'platform.ai.api_key' => null,
+        ]);
+
+        Http::fake(['*' => Http::response([
+            'choices' => [['message' => ['role' => 'assistant', 'content' => 'شرح من الكتاب (صفحة 5)']]],
+        ], 200)]);
+
+        $res = $this->actingAs($student, 'sanctum')
+            ->postJson("/api/v1/lessons/{$lesson->id}/explain", [])
+            ->assertOk();
+
+        $this->assertSame('pollinations', $res->json('provider'));
+        $this->assertTrue($res->json('grounded'));
+    }
 }
