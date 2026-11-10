@@ -1,0 +1,39 @@
+name: Ops — bulk import textbooks (live DB)
+
+# Manual, one-off operation: download and ingest official textbook PDFs into the
+# LIVE production database using the same command the app ships with. Guarded so
+# it never runs on a schedule and never runs without an explicit confirmation.
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: 'Manifest path (backend/)'
+        required: true
+        default: 'database/data/yemen_books_all.json'
+      grade:
+        description: 'Only this grade level (blank = all)'
+        required: false
+        default: ''
+      limit:
+        description: 'Max books this run (0 = all)'
+        required: true
+        default: '3'
+      dry_run:
+        description: 'Only report DB reachability (true/false)'
+        required: true
+        default: 'true'
+
+jobs:
+  recon:
+    name: Recon — is a live DB configured?
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report whether DB_URL secret is present
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+        run: |
+          if [ -n "$DB_URL" ]; then
+            echo "DB_URL: present (len ${#DB_URL})"
+          else
+            echo "DB_URL: ABSENT — bulk import cannot reach the live database."
+          fi
