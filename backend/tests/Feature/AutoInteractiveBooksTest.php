@@ -504,6 +504,160 @@ class AutoInteractiveBooksTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // Source discovery: Crawlee proposes files, a human attaches one
+    // -----------------------------------------------------------------
+
+    /** Point the service at a stub helper that prints the given JSON. */
+    private function stubCrawlee(string $json): void
+    {
+        $dir = sys_get_temp_dir().'/crawlee_stub_'.uniqid();
+        @mkdir($dir, 0777, true);
+        $script = $dir.'/crawl_books.py';
+        // A tiny shell stand-in for the Python helper: it prints the exact JSON
+        // bytes, so these tests exercise the PHP side (parsing, persistence,
+        // attaching) without depending on Python being installed here. The real
+        // helper is validated separately by the syntax test.
+        $b64 = base64_encode($json);
+        file_put_contents($script, "#!/bin/sh\nprintf '%s' '{$b64}' | base64 -d\n");
+        @chmod($script, 0755);
+        config(['platform.crawlee.python' => 'sh', 'platform.crawlee.script' => $script]);
+    }
+
+    public function test_discovery_stores_the_candidates_it_found(): void
+    {
+        $book = $this->makeBook();
+        $this->stubCrawlee(json_encode([
+            'ok' => true,
+            'links' => [
+                ['url' => 'https://edu.ye/math.pdf', 'text' => 'كتاب الرياضيات', 'is_pdf' => true],
+                ['url' => 'https://edu.ye/other', 'text' => 'صفحة', 'is_pdf' => false],
+            ],
+        ], JSON_UNESCAPED_UNICODE));
+
+        $result = app(CrawleeDiscoveryService::class)->discoverFor($book, 'https://edu.ye/books');
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(2, $result['links']);
+        $book->refresh();
+        $this->assertSame('https://edu.ye/books', $book->discovery_url);
+        $this->assertCount(2, $book->source_candidates);
+        $this->assertTrue($book->source_candidates[0]['is_pdf']);
+    }
+
+    public function test_attaching_a_source_uses_the_best_pdf_and_restarts_the_job(): void
+    {
+        $book = $this->makeBook();
+        $this->stubCrawlee(json_encode([
+            'ok' => true,
+            'links' => [
+                ['url' => 'https://edu.ye/index.html', 'text' => 'فهرس', 'is_pdf' => false],
+                ['url' => 'https://edu.ye/math.pdf', 'text' => 'كتاب الرياضيات', 'is_pdf' => true],
+            ],
+        ], JSON_UNESCAPED_UNICODE));
+
+        $response = $this->actingAs($this->owner())
+            ->postJson("/api/v1/textbooks/{$book->id}/discover-source", ['discovery_url' => 'https://edu.ye/books'])
+            ->assertOk();
+
+        $this->assertCount(2, $response->json('candidates'));
+
+        // A stale page from an earlier extraction must not survive the new source.
+        $book->pages()->create(['page_number' => 1, 'extracted_text' => 'نص قديم', 'status' => 'extracted']);
+
+        $this->actingAs($this->owner())
+            ->postJson("/api/v1/textbooks/{$book->id}/attach-source", [])
+            ->assertOk();
+
+        $book->refresh();
+        $this->assertSame('https://edu.ye/math.pdf', $book->source_url);
+        $this->assertSame(0, $book->pages()->count(), 'stale pages must be cleared when the source changes');
+        $this->assertDatabaseHas('book_processing_jobs', ['textbook_id' => $book->id]);
+    }
+
+    public function test_discovery_without_an_index_url_is_refused(): void
+    {
+        $book = $this->makeBook();
+
+        $this->actingAs($this->owner())
+            ->postJson("/api/v1/textbooks/{$book->id}/discover-source", [])
+            ->assertStatus(422);
+    }
+
+    public function test_the_source_endpoint_reports_what_the_book_has(): void
+    {
+        $book = $this->makeBook();
+        $book->forceFill(['discovery_url' => 'https://edu.ye/books', 'source_candidates' => [
+            ['url' => 'https://edu.ye/math.pdf', 'text' => 'كتاب', 'is_pdf' => true],
+        ]])->save();
+
+        $this->actingAs($this->owner())
+            ->getJson("/api/v1/textbooks/{$book->id}/source")
+            ->assertOk()
+            ->assertJsonPath('textbook.discovery_url', 'https://edu.ye/books')
+            ->assertJsonCount(1, 'candidates');
+    }
+
+    public function test_a_student_cannot_discover_or_attach_a_source(): void
+    {
+        $book = $this->makeBook();
+        $student = User::where('email', 'student@school.ye')->first();
+
+        $this->actingAs($student, 'sanctum')
+            ->postJson("/api/v1/textbooks/{$book->id}/discover-source", ['discovery_url' => 'https://edu.ye/books'])
+            ->assertForbidden();
+
+        $this->actingAs($student, 'sanctum')
+            ->postJson("/api/v1/textbooks/{$book->id}/attach-source", ['url' => 'https://edu.ye/math.pdf'])
+            ->assertForbidden();
+    }
+
+    public function test_the_pipeline_tries_discovery_at_most_once_and_does_not_hang(): void
+    {
+        // A book with an index page that yields no PDF must not crawl on every
+        // poll; it should attempt once, find nothing, and then fail cleanly
+        // (there is no source to extract from).
+        $book = $this->makeBook();
+        $book->forceFill(['discovery_url' => 'https://edu.ye/empty'])->save();
+        $this->stubCrawlee(json_encode(['ok' => true, 'links' => []], JSON_UNESCAPED_UNICODE));
+
+        $pipeline = app(BookPipelineService::class);
+        $job = $pipeline->advance($pipeline->start($book));
+
+        $stats = (array) $job->fresh()->stats;
+        $this->assertTrue($stats['discovery_tried'] ?? false, 'discovery should be attempted once');
+        $this->assertSame('failed', $job->fresh()->status);
+
+        // A second advance must not attempt discovery again.
+        $again = $pipeline->advance($job->fresh());
+        $this->assertSame('failed', $again->fresh()->status);
+    }
+
+    public function test_discovery_attaches_a_pdf_so_a_catalogued_book_can_be_processed(): void
+    {
+        $book = $this->makeBook();
+        $book->forceFill(['discovery_url' => 'https://edu.ye/books'])->save();
+        $this->stubCrawlee(json_encode([
+            'ok' => true,
+            'links' => [['url' => 'https://edu.ye/math.pdf', 'text' => 'كتاب', 'is_pdf' => true]],
+        ], JSON_UNESCAPED_UNICODE));
+
+        app(CrawleeDiscoveryService::class)->attachSourcePdf($book->refresh());
+
+        $this->assertSame('https://edu.ye/math.pdf', $book->refresh()->source_url);
+    }
+
+    public function test_attach_never_overrides_a_source_a_human_chose(): void
+    {
+        $book = $this->makeBook();
+        $book->forceFill(['source_url' => 'https://edu.ye/human-choice.pdf'])->save();
+
+        $attached = app(CrawleeDiscoveryService::class)->attachSourcePdf($book);
+
+        $this->assertNull($attached);
+        $this->assertSame('https://edu.ye/human-choice.pdf', $book->refresh()->source_url);
+    }
+
+    // -----------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------
 

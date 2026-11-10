@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\AiTeacherService;
 use App\Services\BookPipelineService;
 use App\Services\ContentExtractionService;
+use App\Services\CrawleeDiscoveryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -24,6 +25,7 @@ class TeacherController extends Controller
         private ContentExtractionService $extractor,
         private AiTeacherService $ai,
         private BookPipelineService $pipeline,
+        private CrawleeDiscoveryService $discovery,
     ) {}
 
     /**
@@ -37,6 +39,7 @@ class TeacherController extends Controller
             'term' => ['required', 'in:first,second'],
             'edition' => ['nullable', 'string', 'max:60'],
             'source_type' => ['required', 'in:pdf,images,manual'],
+            'discovery_url' => ['nullable', 'url', 'max:2048'],
         ]);
 
         $textbook = Textbook::create($data + ['status' => 'draft']);
@@ -57,6 +60,7 @@ class TeacherController extends Controller
             'publisher' => ['nullable', 'string', 'max:120'],
             'authority' => ['sometimes', 'required', 'in:common,sanaa,aden'],
             'branch' => ['sometimes', 'required', 'in:general,scientific,literary'],
+            'discovery_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
         ]);
 
         $textbook->update($data);
@@ -447,5 +451,96 @@ class TeacherController extends Controller
         $job = $this->pipeline->approve($textbook, $request->user()?->name);
 
         return response()->json(['job' => $job, 'published' => $textbook->lessons()->count()]);
+    }
+
+    /**
+     * Where a book's source stands: its index page, the PDF chosen, and any
+     * candidate links already discovered. The console renders this so a reviewer
+     * can see, without re-crawling, what the helper found for the book.
+     */
+    public function sourceStatus(Textbook $textbook)
+    {
+        return response()->json([
+            'textbook' => [
+                'id' => $textbook->id,
+                'title' => $textbook->title,
+                'file_path' => $textbook->file_path,
+                'source_url' => $textbook->source_url,
+                'discovery_url' => $textbook->discovery_url,
+            ],
+            'candidates' => (array) ($textbook->source_candidates ?? []),
+            'crawlee_available' => $this->discovery->available(),
+        ]);
+    }
+
+    /**
+     * Crawl the book's index page with the Crawlee helper and store the links it
+     * found. Discovery only *proposes* files; it never attaches one by itself, so
+     * a reviewer decides which edition is the right source.
+     */
+    public function discoverSource(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'discovery_url' => ['nullable', 'url', 'max:2048'],
+            'max_pages' => ['nullable', 'integer', 'min:1', 'max:5'],
+        ]);
+
+        $url = $data['discovery_url'] ?? $textbook->discovery_url;
+        if (! $url) {
+            return response()->json(['message' => 'حدّد رابط صفحة الفهرس أولًا.'], 422);
+        }
+
+        $result = $this->discovery->discoverFor($textbook, $url, (int) ($data['max_pages'] ?? 2));
+        if (! $result['ok']) {
+            return response()->json(['message' => $result['error'] ?? 'لم يُعثر على روابط.'], 422);
+        }
+
+        return response()->json([
+            'textbook' => $textbook->fresh(),
+            'candidates' => $result['links'],
+        ]);
+    }
+
+    /**
+     * Attach a chosen candidate (or the best PDF the helper found) as the book's
+     * source, then restart its processing so the pipeline extracts it. Attaching
+     * clears any earlier pages so a stale extraction cannot be mixed with a new
+     * source, which is why it is an explicit, deliberate action.
+     */
+    public function attachSource(Request $request, Textbook $textbook)
+    {
+        $data = $request->validate([
+            'url' => ['nullable', 'url', 'max:2048'],
+        ]);
+
+        $url = $data['url'] ?? null;
+        if ($url === null) {
+            $candidates = (array) ($textbook->source_candidates ?? []);
+            if ($candidates === [] && $textbook->discovery_url) {
+                $found = $this->discovery->discoverFor($textbook);
+                $candidates = $found['links'] ?? [];
+            }
+            $url = $this->discovery->bestPdfCandidate($candidates)['url'] ?? null;
+        }
+
+        if (! $url) {
+            return response()->json(['message' => 'لا يوجد ملف PDF لاعتماده كمصدر.'], 422);
+        }
+
+        // A new source invalidates the old extraction; keep lessons that a human
+        // authored (published), drop machine drafts so they are rebuilt cleanly.
+        $textbook->pages()->delete();
+        $textbook->lessons()->where('status', '!=', 'published')->delete();
+
+        $textbook->forceFill([
+            'source_url' => $url,
+            'pages_count' => 0,
+            'status' => 'draft',
+        ])->save();
+
+        BookProcessingJob::where('textbook_id', $textbook->id)->delete();
+        $job = $this->pipeline->advance($this->pipeline->start($textbook));
+
+        return response()->json(['textbook' => $textbook->fresh(), 'job' => $job->fresh()]);
     }
 }

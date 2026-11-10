@@ -27,6 +27,7 @@ class BookPipelineService
     public function __construct(
         private ContentExtractionService $extractor,
         private InteractiveModelService $models,
+        private CrawleeDiscoveryService $discovery,
     ) {}
 
     /**
@@ -91,6 +92,31 @@ class BookPipelineService
      */
     private function extractStep(BookProcessingJob $job, Textbook $textbook): BookProcessingJob
     {
+        // A book catalogued with an index page but no file yet: ask the optional
+        // Crawlee helper once, early, whether that page names a PDF. This never
+        // replaces the extractor - it only fills in a source the human did not
+        // upload - and it runs at most once per job so a page that lists nothing
+        // cannot stall the pipeline in a crawl loop.
+        if (! $textbook->file_path && ! $textbook->source_url && $textbook->discovery_url) {
+            $stats = (array) $job->stats;
+            if (empty($stats['discovery_tried'])) {
+                $stats['discovery_tried'] = true;
+                $job->stats = $stats;
+                $job->save();
+
+                try {
+                    $attached = $this->discovery->attachSourcePdf($textbook->refresh());
+                    if ($attached) {
+                        $textbook->refresh();
+                    }
+                } catch (\Throwable $e) {
+                    // Discovery is a convenience; a failure here must not stop a
+                    // book that already carries its own pages.
+                    Log::info('Book source discovery failed', ['textbook' => $textbook->id, 'error' => $e->getMessage()]);
+                }
+            }
+        }
+
         if (! $textbook->file_path && ! $textbook->source_url) {
             // A book can arrive already carrying its pages: the teacher uploaded
             // page images one by one, or the pages were seeded/imported. There is

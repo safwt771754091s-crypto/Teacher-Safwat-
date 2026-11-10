@@ -117,6 +117,7 @@ return [
     'crawlee' => [
         'python' => env('CRAWLEE_PYTHON', 'python3'),
         'timeout' => (int) env('CRAWLEE_TIMEOUT', 90),
+        'script' => env('CRAWLEE_SCRIPT', base_path('tools/crawlee_service/crawl_books.py')),
     ],
 
     'storage' => [

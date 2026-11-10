@@ -960,6 +960,7 @@
                 <input id="tbTitle" placeholder="عنوان الكتاب">
                 <select id="tbTerm"><option value="first">الفصل الأول</option><option value="second">الفصل الثاني</option></select>
                 <select id="tbSource"><option value="pdf">PDF</option><option value="images">صور صفحات</option><option value="manual">إدخال يدوي</option></select>
+                <input id="tbDiscover" placeholder="رابط صفحة الفهرس (اختياري)">
                 <button class="btn primary" id="tbCreate">إنشاء</button>
             </div>
         </div>
@@ -971,6 +972,7 @@
                 await API.post('/textbooks', {
                     subject_id: Number(sid), title: el('tbTitle').value,
                     term: el('tbTerm').value, source_type: el('tbSource').value,
+                    discovery_url: el('tbDiscover').value.trim() || null,
                 });
                 toast('تم إنشاء الكتاب'); loadContentBooks();
             } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
@@ -989,6 +991,7 @@
             <div class="ex-actions">
                 <button class="btn small" data-bact="upload-pdf" data-id="${t.id}">📤 رفع PDF</button>
                 <button class="btn small" data-bact="upload-page" data-id="${t.id}">🖼️ رفع صفحة</button>
+                <button class="btn small ghost" data-bact="source" data-id="${t.id}">🔗 المصدر (بحث آلي)</button>
                 <button class="btn small ghost" data-bact="edit" data-id="${t.id}" data-title="${esc(t.title)}" data-term="${esc(t.term)}" data-authority="${esc(t.authority || 'common')}" data-branch="${esc(t.branch || 'general')}">✏️ تعديل البيانات</button>
                 <button class="btn small" data-bact="pages" data-id="${t.id}">📄 مراجعة الصفحات</button>
                 <button class="btn small" data-bact="draft-lessons" data-id="${t.id}">✂️ توليد مسودات الدروس</button>
@@ -1036,6 +1039,8 @@
             openBookEdit(card);
         } else if (act === 'pages') {
             openPagesReview(id, card);
+        } else if (act === 'source') {
+            openSourcePanel(id, card);
         } else if (act === 'draft-lessons') {
             busy(true);
             API.post(`/textbooks/${id}/draft-lessons`, {}).then((r) => { toast(`تم إنشاء ${r.lessons_created} درس مسودة`); loadContentBooks(); }).catch((e) => toast(e.message, 'error')).finally(() => busy(false));
@@ -1050,6 +1055,79 @@
         } else if (act === 'lessons') {
             openLessonAdmin(id, card);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Source discovery: find a book's file, then attach it deliberately
+    // ---------------------------------------------------------------------
+
+    // The Crawlee helper proposes the files an index page links to; it never
+    // attaches one on its own. This panel shows what the book already has, lets
+    // a reviewer re-scan, and attaches the chosen PDF as the book's source.
+    async function openSourcePanel(id, card) {
+        const host = card.querySelector('.book-out');
+        busy(true);
+        let data;
+        try {
+            data = await API.get(`/textbooks/${id}/source`);
+        } catch (e) { toast(e.message, 'error'); busy(false); return; }
+        busy(false);
+        renderSourcePanel(id, card, host, data);
+    }
+
+    function renderSourcePanel(id, card, host, data) {
+        const tb = data.textbook || {};
+        const cands = data.candidates || [];
+        const available = data.crawlee_available;
+        const current = tb.source_url || tb.file_path;
+        host.innerHTML = `
+            <div class="source-panel">
+                <div class="job-head">
+                    <strong>مصدر الكتاب</strong>
+                    <span class="muted small">${available ? 'أداة البحث الآلي متاحة' : 'أداة البحث الآلي غير مثبّتة'}</span>
+                </div>
+                ${current
+                    ? `<div class="muted small">المصدر الحالي: <span class="chip">${esc(current)}</span></div>`
+                    : '<div class="warn">لا يوجد ملف مصدر بعد. حدّد صفحة الفهرس ثم ابحث، أو ارفع ملفًا.</div>'}
+                <label>رابط صفحة الفهرس
+                    <input id="srcIndex" value="${esc(tb.discovery_url || '')}" placeholder="https://...">
+                </label>
+                <div class="ex-actions">
+                    <button class="btn small" id="srcDiscover">🔍 بحث آلي عن الملفات</button>
+                </div>
+                ${cands.length ? `
+                    <div class="src-cands">
+                        ${cands.map((c, i) => `
+                            <label class="src-cand">
+                                <input type="radio" name="srcPick" value="${esc(c.url)}" ${i === 0 ? 'checked' : ''}>
+                                <span class="chip">${c.is_pdf ? 'PDF' : 'رابط'}</span>
+                                <span class="muted small">${esc((c.text || '').slice(0, 80) || c.url)}</span>
+                            </label>`).join('')}
+                        <button class="btn primary small" id="srcAttach">✅ اعتماد المحدد كمصدر وبدء المعالجة</button>
+                    </div>` : '<p class="muted small">لم يُعثر على روابط بعد.</p>'}
+            </div>`;
+        const disc = host.querySelector('#srcDiscover');
+        if (disc) disc.onclick = async () => {
+            const url = host.querySelector('#srcIndex').value.trim();
+            if (!url) { toast('أدخل رابط صفحة الفهرس', 'error'); return; }
+            busy(true);
+            try {
+                const r = await API.post(`/textbooks/${id}/discover-source`, { discovery_url: url });
+                toast(`تم العثور على ${(r.candidates || []).length} رابط`);
+                renderSourcePanel(id, card, host, { textbook: r.textbook, candidates: r.candidates, crawlee_available: available });
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
+        const attach = host.querySelector('#srcAttach');
+        if (attach) attach.onclick = async () => {
+            const pick = host.querySelector('input[name="srcPick"]:checked');
+            if (!pick) { toast('اختر ملفًا أولًا', 'error'); return; }
+            busy(true);
+            try {
+                await API.post(`/textbooks/${id}/attach-source`, { url: pick.value });
+                toast('تم اعتماد المصدر وبدأت المعالجة');
+                startJobPolling(id, card);
+            } catch (e) { toast(e.message, 'error'); } finally { busy(false); }
+        };
     }
 
     // ---------------------------------------------------------------------

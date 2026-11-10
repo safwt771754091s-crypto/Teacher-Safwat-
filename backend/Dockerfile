@@ -5,8 +5,10 @@ FROM php:8.4-cli
 # pdo_pgsql is the production driver: the database is Supabase PostgreSQL.
 # poppler-utils/ghostscript/tesseract are required at runtime to render textbook
 # pages and OCR scanned books, so they are installed in the image (not dev-only).
+# python3 is for the optional Crawlee source-discovery helper (tools/crawlee_service).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip pkg-config \
+        python3 python3-pip python3-venv \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libonig-dev \
         libpq-dev libsqlite3-dev libxml2-dev \
         postgresql-client poppler-utils ghostscript \
@@ -14,6 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" pdo_pgsql pdo_sqlite mbstring bcmath gd intl zip xml \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional Crawlee source-discovery helper in an isolated venv. Installed with
+# `|| true`: discovery is a convenience, and a failed install (e.g. no network
+# at build time) must never break the image - the app simply skips discovery.
+RUN python3 -m venv /opt/crawlee \
+    && (/opt/crawlee/bin/pip install --no-cache-dir 'crawlee[beautifulsoup]>=1.11,<2' || true)
+ENV CRAWLEE_PYTHON=/opt/crawlee/bin/python
 
 # Composer (from the official image).
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer

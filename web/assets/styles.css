@@ -389,6 +389,20 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); bor
     background: #ecfdf5; color: var(--green-dark, #24513a);
     font-size: .8rem; font-weight: 700;
 }
+/* Source discovery panel: an index URL, the links found under it, and a
+   deliberate "attach" step. Stacked and full-width so it is usable on a phone. */
+.source-panel {
+    margin-top: 12px; border: 1px solid var(--line, #e5e7eb); border-radius: 14px;
+    padding: 10px 12px; background: #fff; display: flex; flex-direction: column; gap: 8px;
+}
+.source-panel label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.source-panel input[type="text"], .source-panel input:not([type]) { width: 100%; }
+.src-cands { display: flex; flex-direction: column; gap: 6px; }
+.src-cand {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border: 1px solid var(--line, #e5e7eb); border-radius: 10px; padding: 6px 8px; cursor: pointer;
+}
+.src-cand:hover { background: #f7faf8; }
 @media (max-width: 560px) {
     .job-head { flex-direction: column; align-items: flex-start; }
     .rev-lesson-head { flex-direction: column; align-items: flex-start; }

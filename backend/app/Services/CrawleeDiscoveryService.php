@@ -19,7 +19,23 @@ class CrawleeDiscoveryService
 {
     private function scriptPath(): string
     {
-        return base_path('tools/crawlee_service/crawl_books.py');
+        return (string) config('platform.crawlee.script', base_path('tools/crawlee_service/crawl_books.py'));
+    }
+
+    /** Remove a throwaway directory and everything in it. */
+    private function removeDir(string $dir): void
+    {
+        if (! is_dir($dir)) {
+            return;
+        }
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($items as $item) {
+            $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($dir);
     }
 
     /** True when the helper is actually runnable here. */
@@ -52,8 +68,17 @@ class CrawleeDiscoveryService
 
         $python = (string) config('platform.crawlee.python', 'python3');
         $timeout = (int) config('platform.crawlee.timeout', 90);
+
+        // Run in a throwaway working directory: Crawlee writes a storage/ folder
+        // of request-queue state next to wherever it runs, and that must never
+        // land in the application tree (or leak between runs).
+        $workdir = sys_get_temp_dir().'/crawlee_'.uniqid();
+        @mkdir($workdir, 0777, true);
+
         $cmd = sprintf(
-            'timeout %d %s %s --url %s --max-pages %d 2>/dev/null',
+            'cd %s && CRAWLEE_STORAGE_DIR=%s timeout %d %s %s --url %s --max-pages %d 2>/dev/null',
+            escapeshellarg($workdir),
+            escapeshellarg($workdir.'/storage'),
             $timeout,
             escapeshellarg($python),
             escapeshellarg($this->scriptPath()),
@@ -61,7 +86,12 @@ class CrawleeDiscoveryService
             max(1, $maxPages),
         );
 
-        $raw = (string) @shell_exec($cmd);
+        try {
+            $raw = (string) @shell_exec($cmd);
+        } finally {
+            $this->removeDir($workdir);
+        }
+
         $decoded = json_decode($raw, true);
 
         if (! is_array($decoded) || ! ($decoded['ok'] ?? false)) {
@@ -78,28 +108,75 @@ class CrawleeDiscoveryService
     }
 
     /**
-     * Best-effort: attach the first discovered PDF to a book that has none, so
-     * the pipeline can then extract it. Returns the URL it attached, or null.
+     * Crawl an index page for a book and remember the candidates on the row.
+     *
+     * Persisting them is the point: crawling is slow and depends on the network,
+     * so a reviewer who looks at the list later should not trigger another crawl.
+     * The book's own source is never touched here - choosing a file is a separate,
+     * explicit action.
+     */
+    public function discoverFor(Textbook $textbook, ?string $url = null, int $maxPages = 2): array
+    {
+        $url = $url ?: $textbook->discovery_url;
+        if (! $url) {
+            return ['ok' => false, 'links' => [], 'pages' => [], 'error' => 'لم يُحدَّد رابط صفحة الفهرس.'];
+        }
+
+        $found = $this->discover($url, $maxPages);
+        if (! $found['ok']) {
+            return $found;
+        }
+
+        $candidates = array_values(array_map(fn ($link) => [
+            'url' => (string) ($link['url'] ?? ''),
+            'text' => (string) ($link['text'] ?? ''),
+            'is_pdf' => (bool) ($link['is_pdf'] ?? false),
+        ], $found['links']));
+
+        $textbook->forceFill([
+            'discovery_url' => $url,
+            'source_candidates' => $candidates,
+        ])->save();
+
+        return ['ok' => true, 'links' => $candidates, 'pages' => $found['pages']];
+    }
+
+    /** The best PDF among a candidate list, or null when none is a PDF. */
+    public function bestPdfCandidate(array $candidates): ?array
+    {
+        foreach ($candidates as $candidate) {
+            if (! empty($candidate['is_pdf']) && filter_var($candidate['url'] ?? '', FILTER_VALIDATE_URL)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Attach a discovered PDF to a book that has none, so the pipeline can then
+     * extract it. Crawls the book's index page when no candidate was stored yet,
+     * and returns the URL it attached (or null when there is nothing to attach).
      */
     public function attachSourcePdf(Textbook $textbook): ?string
     {
         if ($textbook->file_path || $textbook->source_url) {
             return null; // already has a source; never override a human's choice
         }
-        $index = $textbook->source_url ?: null;
-        if (! $index) {
+
+        $candidates = (array) ($textbook->source_candidates ?? []);
+        if ($candidates === [] && $textbook->discovery_url) {
+            $found = $this->discoverFor($textbook);
+            $candidates = $found['links'] ?? [];
+        }
+
+        $best = $this->bestPdfCandidate($candidates);
+        if ($best === null) {
             return null;
         }
 
-        $found = $this->discover($index);
-        foreach ($found['links'] ?? [] as $link) {
-            if (! empty($link['is_pdf']) && filter_var($link['url'], FILTER_VALIDATE_URL)) {
-                $textbook->update(['source_url' => $link['url']]);
+        $textbook->forceFill(['source_url' => $best['url']])->save();
 
-                return $link['url'];
-            }
-        }
-
-        return null;
+        return $best['url'];
     }
 }
