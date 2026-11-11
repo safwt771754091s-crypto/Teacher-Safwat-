@@ -1,0 +1,6 @@
+services:
+  imgproxy:
+    image: darthsim/imgproxy
+    environment:
+      - IMGPROXY_ENABLE_WEBP_DETECTION=true
+      - IMGPROXY_JPEG_PROGRESSIVE=true
