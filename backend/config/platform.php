@@ -63,25 +63,20 @@ return [
     | is configured the platform still explains lessons by composing the source
     | content directly, so nothing is ever invented.
     */
-    'ai' => [
+    'ai' => (function () {
         // The platform must answer the teacher out of the box with no signup and
         // no credit card, so the free keyless provider is the default. An owner
         // can switch to a paid provider (and its key) from the console at any
         // time; that saved choice always wins over this default.
-        'provider' => env('LLM_PROVIDER', 'pollinations'), // none|pollinations|openai|gemini
-        'api_key' => env('LLM_API_KEY'),
-        'model' => env('LLM_MODEL', 'openai'),
-        'base_url' => env('LLM_BASE_URL', 'https://api.openai.com/v1'),
-        'timeout' => (int) env('LLM_TIMEOUT', 30),
-        // Free tiers answer at a limited rate; retry rather than fail the run.
-        'retries' => (int) env('LLM_RETRIES', 3),
-        'max_context_pages' => 4,
-        'daily_free_questions' => (int) env('AI_DAILY_FREE_QUESTIONS', 20),
+        $provider = env('LLM_PROVIDER', 'pollinations'); // none|pollinations|openai|gemini
 
         // OpenAI-compatible endpoints. Choosing a provider picks its base URL, so
         // the owner never has to know one, and can switch to a free provider when
-        // an OpenAI account runs out of credit.
-        'endpoints' => [
+        // an OpenAI account runs out of credit. These are declared here because
+        // the default provider must resolve to its own endpoint too - resolving
+        // only the provider stored in the console would leave the built-in
+        // default pointed at OpenAI and fail every call with a 401.
+        $endpoints = [
             'pollinations' => 'https://text.pollinations.ai/openai',
             'openai' => 'https://api.openai.com/v1',
             'openrouter' => 'https://openrouter.ai/api/v1',
@@ -91,13 +86,8 @@ return [
             'mistral' => 'https://api.mistral.ai/v1',
             'xai' => 'https://api.x.ai/v1',
             'gemini' => 'https://generativelanguage.googleapis.com/v1beta/openai',
-        ],
-
-        // Providers that answer without a key. The teacher is "ready" for these
-        // even with no key stored, so the owner can run free with no signup.
-        'keyless' => ['pollinations'],
-
-        'models' => [
+        ];
+        $models = [
             'pollinations' => 'openai',
             'openai' => 'gpt-4o-mini',
             'openrouter' => 'google/gemma-4-31b-it:free',
@@ -107,8 +97,31 @@ return [
             'mistral' => 'mistral-small-latest',
             'together' => 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
             'xai' => 'grok-2-latest',
-        ],
-    ],
+        ];
+
+        return [
+            'provider' => $provider,
+            'api_key' => env('LLM_API_KEY'),
+            'model' => env('LLM_MODEL') ?: ($models[$provider] ?? 'gpt-4o-mini'),
+            'base_url' => env('LLM_BASE_URL') ?: ($endpoints[$provider] ?? 'https://api.openai.com/v1'),
+            'timeout' => (int) env('LLM_TIMEOUT', 30),
+            // Free tiers answer at a limited rate; retry rather than fail the run.
+            'retries' => (int) env('LLM_RETRIES', 3),
+            'max_context_pages' => 4,
+            'daily_free_questions' => (int) env('AI_DAILY_FREE_QUESTIONS', 20),
+
+            // OpenAI-compatible endpoints. Choosing a provider picks its base URL, so
+            // the owner never has to know one, and can switch to a free provider when
+            // an OpenAI account runs out of credit.
+            'endpoints' => $endpoints,
+
+            // Providers that answer without a key. The teacher is "ready" for these
+            // even with no key stored, so the owner can run free with no signup.
+            'keyless' => ['pollinations'],
+
+            'models' => $models,
+        ];
+    })(),
 
     /*
     |--------------------------------------------------------------------------

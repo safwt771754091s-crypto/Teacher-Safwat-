@@ -169,6 +169,10 @@ class CurriculumTest extends TestCase
         $lesson = Lesson::whereHas('textbook', fn ($q) => $q->where('subject_id', $subject->id))
             ->where('title', 'Greetings')->firstOrFail();
 
+        // Deterministic and offline: pin the no-provider path so the explanation
+        // is composed from the lesson source itself, never a live model call.
+        config(['platform.ai.provider' => 'none']);
+
         $explanation = app(AiTeacherService::class)->explain($lesson)['explanation'];
         $joined = implode("\n", $explanation);
 
