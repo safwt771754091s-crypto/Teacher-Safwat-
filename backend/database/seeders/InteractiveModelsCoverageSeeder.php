@@ -29,6 +29,11 @@ class InteractiveModelsCoverageSeeder extends Seeder
 {
     private const MARKER = 'نموذج الدرس';
 
+    /** The catch-all rule and the neutral card it gives a structural row. */
+    private const CATCH_ALL = '~.*~u';
+
+    private const GENERIC_TITLE = 'خطوات دراسة الدرس';
+
     public function run(): void
     {
         $rules = $this->rules();
@@ -69,6 +74,61 @@ class InteractiveModelsCoverageSeeder extends Seeder
         $this->command?->info("Interactive models attached to {$attached} lesson(s); {$skipped} left unchanged.");
 
         $this->upgradeSpatialTopics();
+        $this->upgradeGenericCards();
+    }
+
+    /**
+     * An earlier run gave a lesson the neutral study-plan card because its title
+     * matched no topic rule. Once a rule exists for that title, replace the card
+     * with the topic figure. Only a lesson whose sole figure is that card is
+     * touched, so a lesson that already carries a real model is left alone.
+     */
+    private function upgradeGenericCards(): void
+    {
+        $patterns = [];
+        foreach ($this->rules() as [$regex, $models]) {
+            if ($regex !== self::CATCH_ALL) {
+                $patterns[] = [$regex, $models];
+            }
+        }
+
+        $genericTitle = self::MARKER.': '.self::GENERIC_TITLE;
+        $upgraded = 0;
+
+        Lesson::query()->orderBy('id')->chunk(200, function ($lessons) use ($patterns, $genericTitle, &$upgraded) {
+            foreach ($lessons as $lesson) {
+                $sections = $lesson->sections()->whereNotNull('visual')->get();
+                if ($sections->count() !== 1 || $sections->first()->title !== $genericTitle) {
+                    continue;
+                }
+                $models = null;
+                foreach ($patterns as [$regex, $candidate]) {
+                    if (preg_match($regex, (string) $lesson->title)) {
+                        $models = $candidate;
+                        break;
+                    }
+                }
+                if (! $models) {
+                    continue;
+                }
+                $sections->first()->delete();
+                foreach ($models as $i => $model) {
+                    LessonSection::updateOrCreate(
+                        ['lesson_id' => $lesson->id, 'title' => self::MARKER.': '.$model['title']],
+                        [
+                            'type' => 'example',
+                            'content' => $model['caption'],
+                            'visual' => $model['spec'],
+                            'is_from_textbook' => false,
+                            'sort_order' => 950 + $i,
+                        ],
+                    );
+                }
+                $upgraded++;
+            }
+        });
+
+        $this->command?->info("Generic card upgraded to a topic figure on {$upgraded} lesson(s).");
     }
 
     /**

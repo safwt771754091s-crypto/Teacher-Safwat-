@@ -54,6 +54,35 @@ class InteractiveModelsCoverageTest extends TestCase
         $this->assertSame($before, LessonSection::count(), 're-running the seeder must not add or remove sections');
     }
 
+    public function test_a_generic_card_is_replaced_once_a_topic_rule_exists(): void
+    {
+        $lesson = Lesson::where('title', 'نص: الوطن')->first();
+        $this->assertNotNull($lesson, 'the lesson «نص: الوطن» should exist');
+
+        $lesson->sections()->whereNotNull('visual')->delete();
+        LessonSection::create([
+            'lesson_id' => $lesson->id,
+            'title' => 'نموذج الدرس: خطوات دراسة الدرس',
+            'type' => 'example',
+            'content' => 'بطاقة عامة',
+            'visual' => ['kind' => 'sequence', 'params' => ['steps' => ['قراءة']]],
+            'is_from_textbook' => false,
+            'sort_order' => 950,
+        ]);
+
+        $this->seed(InteractiveModelsCoverageSeeder::class);
+
+        $this->assertSame(['sequence'], $this->visualKinds($lesson->fresh()));
+        $this->assertTrue(
+            $lesson->sections()->where('title', 'like', '%تحليل النص%')->exists(),
+            'the generic card should be replaced by the topic figure',
+        );
+        $this->assertFalse(
+            $lesson->sections()->where('title', 'like', '%خطوات دراسة الدرس%')->exists(),
+            'the generic card should be gone',
+        );
+    }
+
     public function test_every_seeded_kind_is_registered_by_the_frontend_engine(): void
     {
         $registered = $this->registeredKinds();
