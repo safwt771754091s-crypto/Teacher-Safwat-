@@ -57,6 +57,18 @@ class TextbookImportTest extends TestCase
             ->assertJsonValidationErrors('manifest');
     }
 
+    public function test_import_accepts_the_verified_manifest_and_drafts_by_default(): void
+    {
+        // The console sends the verified manifest key; an offset past the end of
+        // the manifest keeps the batch offline and instant while still exercising
+        // the full request path (validation + default draft-lessons + JSON summary).
+        $this->actingAs($this->owner(), 'sanctum')
+            ->postJson('/api/v1/owner/textbooks/import', ['manifest' => 'live', 'offset' => 99999, 'max_seconds' => 5])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonStructure(['ok', 'next_offset', 'timed_out']);
+    }
+
     public function test_import_command_emits_a_json_batch_summary(): void
     {
         // Drive the command through the same service the owner endpoint uses,
@@ -71,14 +83,24 @@ class TextbookImportTest extends TestCase
         $this->assertArrayHasKey('timed_out', $result);
     }
 
-    public function test_the_platform_adopts_the_aden_curriculum_by_default(): void
+    public function test_the_platform_adopts_the_verified_aden_manifest_by_default(): void
     {
         // The owner asked for a single adopted curriculum: the Aden editions
         // (plus the shared national "common" books). The import must therefore
-        // default to the Aden manifest, and the learner view to the Aden filter.
+        // default to the verified real-PDF manifest, and the learner view to the
+        // Aden filter.
         $this->assertSame('aden', config('platform.curriculum.authority'));
-        $this->assertSame('aden', TextbookImportService::defaultManifest());
-        $this->assertFileExists(base_path(TextbookImportService::MANIFESTS['aden']));
+        $this->assertSame('live', TextbookImportService::defaultManifest());
+        $this->assertFileExists(base_path(TextbookImportService::MANIFESTS['live']));
+
+        // Every URL in the verified manifest must be a real http(s) link, so an
+        // import never wastes a batch on a placeholder.
+        $manifest = json_decode((string) file_get_contents(base_path(TextbookImportService::MANIFESTS['live'])), true);
+        $this->assertIsArray($manifest);
+        $this->assertNotEmpty($manifest);
+        foreach ($manifest as $entry) {
+            $this->assertStringStartsWith('https://', (string) ($entry['url'] ?? ''));
+        }
     }
 
     public function test_a_batch_that_runs_out_of_time_resumes_without_advancing(): void

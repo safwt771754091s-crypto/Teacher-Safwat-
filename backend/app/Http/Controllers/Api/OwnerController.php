@@ -260,11 +260,12 @@ class OwnerController extends Controller
     public function importTextbooks(Request $request, TextbookImportService $import)
     {
         $data = $request->validate([
-            'manifest' => ['nullable', 'in:all,aden,sanaa'],
+            'manifest' => ['nullable', 'in:live,all,aden,sanaa'],
             'offset' => ['nullable', 'integer', 'min:0'],
             'grade' => ['nullable', 'integer', 'min:1', 'max:12'],
             'max_seconds' => ['nullable', 'integer', 'min:5', 'max:120'],
             'force' => ['nullable', 'boolean'],
+            'draft_lessons' => ['nullable', 'boolean'],
         ]);
 
         $result = $import->runBatch(
@@ -273,6 +274,9 @@ class OwnerController extends Controller
             (int) ($data['max_seconds'] ?? 25),
             isset($data['grade']) ? (int) $data['grade'] : null,
             (bool) ($data['force'] ?? false),
+            // Draft lessons by default: the point of importing a book is to show
+            // its real text, not to keep the seeded outline.
+            (bool) ($data['draft_lessons'] ?? true),
         );
 
         return response()->json($result, $result['ok'] ? 200 : 422);

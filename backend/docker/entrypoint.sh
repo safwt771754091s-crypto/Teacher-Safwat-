@@ -61,7 +61,7 @@ php artisan db:seed --class=UsersAndGamesSeeder --force >/dev/null 2>&1 || true
 # with firstOrCreate (which never updates existing rows), so on an
 # already-seeded database the URLs must be backfilled here. The command only
 # touches rows whose source_url is still null, so it is safe to re-run.
-for manifest in database/data/yemen_books_all.json database/data/yemen_books_aden.json database/data/yemen_books.json; do
+for manifest in database/data/yemen_books_live.json database/data/yemen_books_all.json database/data/yemen_books_aden.json database/data/yemen_books.json; do
     if [ -f "$manifest" ]; then
         php artisan textbooks:backfill-sources "$manifest" || echo "WARNING: backfill from $manifest failed; continuing." >&2
     fi
