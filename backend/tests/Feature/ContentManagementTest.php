@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AiUsageLog;
 use App\Models\Lesson;
 use App\Models\Subject;
 use App\Models\Textbook;
@@ -255,10 +256,20 @@ class ContentManagementTest extends TestCase
             ->getJson('/api/v1/owner/overview')
             ->assertOk()
             ->assertJsonStructure(['counts' => ['users', 'lessons']]);
+        // Seed one row so the eager-loaded `user` relation is actually resolved:
+        // with an empty table Eloquent skips the load and a missing relation goes
+        // unnoticed until a real request has usage to show.
+        AiUsageLog::create([
+            'user_id' => $this->owner()->id,
+            'feature' => 'explain',
+            'provider' => 'pollinations',
+            'success' => true,
+        ]);
+
         $this->actingAs($this->owner(), 'sanctum')
             ->getJson('/api/v1/owner/ai-usage')
             ->assertOk()
-            ->assertJsonStructure(['total_requests', 'by_feature']);
+            ->assertJsonStructure(['total_requests', 'by_feature', 'recent']);
     }
 
     public function test_teacher_can_view_struggling_lessons(): void
