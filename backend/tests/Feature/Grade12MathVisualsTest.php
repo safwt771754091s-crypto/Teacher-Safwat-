@@ -37,6 +37,12 @@ class Grade12MathVisualsTest extends TestCase
     /** Kinds implemented by web/assets/interactive3d.js (3-D). */
     private const CLIENT_3D_KINDS = [
         'solid-3d', 'solid-of-revolution', 'vector-3d', 'surface-3d',
+        'atom-3d', 'molecule-3d', 'cell-3d', 'plant-3d', 'earth-3d', 'prism-3d',
+    ];
+
+    /** The 3-D kinds the Grade-12 maths book itself is expected to use. */
+    private const MATHS_3D_KINDS = [
+        'solid-3d', 'solid-of-revolution', 'vector-3d', 'surface-3d',
     ];
 
     /** Kinds implemented by web/assets/interactive-lessons.js (DOM models). */
@@ -147,7 +153,7 @@ class Grade12MathVisualsTest extends TestCase
             ->filter(fn ($k) => in_array($k, self::CLIENT_3D_KINDS, true));
 
         $this->assertGreaterThanOrEqual(4, $kinds->count(), 'The book should use several 3-D models.');
-        foreach (self::CLIENT_3D_KINDS as $kind) {
+        foreach (self::MATHS_3D_KINDS as $kind) {
             $this->assertTrue($kinds->contains($kind), "No lesson uses the «{$kind}» 3-D model.");
         }
     }

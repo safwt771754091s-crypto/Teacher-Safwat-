@@ -823,6 +823,390 @@
         };
     };
 
+    /* 5) الأرض والشمس — the tilted axis is what makes the seasons. */
+    KINDS['earth-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var tilt = p.tilt != null ? p.tilt : 23.5;
+        var spin = p.spin != null ? p.spin : 0;
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 13, yaw: 0.7, pitch: 0.35 });
+
+        function place(m, dx, dy, dz) {
+            m.v = m.v.map(function (q) { return [q[0] + dx, q[1] + dy, q[2] + dz]; });
+            return m;
+        }
+
+        function build() {
+            scene.clear();
+            var R = 2.2, t = tilt * Math.PI / 180;
+            var earth = sphere(R, 26); earth.color = BLUE; scene.add(earth);
+
+            // The rotation axis, tilted from the vertical: the seasons come from
+            // this tilt, not from the distance to the sun.
+            var ax = [Math.sin(t), Math.cos(t), 0];
+            scene.line([-ax[0] * R * 1.5, -ax[1] * R * 1.5, 0], [ax[0] * R * 1.5, ax[1] * R * 1.5, 0], '#f59e0b', 2);
+
+            // Equator (perpendicular to the axis) and the rotating meridian.
+            var prev = null;
+            for (var i = 0; i <= 48; i++) {
+                var a = i / 48 * Math.PI * 2;
+                var pt = [R * Math.cos(a) * Math.cos(t), -R * Math.cos(a) * Math.sin(t), R * Math.sin(a)];
+                if (prev) scene.line(prev, pt, '#e2e8f0', 1);
+                prev = pt;
+            }
+            var m0 = null;
+            for (var j = 0; j <= 48; j++) {
+                var ang = j / 48 * Math.PI * 2 + spin;
+                var mer = [R * Math.cos(ang) * Math.cos(t), R * Math.cos(ang) * Math.sin(t), R * Math.sin(ang)];
+                if (m0) scene.line(m0, mer, '#0ea5e9', 1);
+                m0 = mer;
+            }
+
+            // Sunlight: parallel rays coming from the right.
+            for (var k = -2; k <= 2; k++) {
+                scene.line([7, k * 1.1, 0], [R * 1.05, k * 1.1, 0], '#fbbf24', 1);
+            }
+            var sun = place(sphere(1.1, 20), 8.5, 0, 0); sun.color = [245, 158, 11]; scene.add(sun);
+
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = 15;
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            read.innerHTML =
+                '<code>ميل المحور = ' + fmt(tilt, 1) + '°</code>' +
+                '<code>الدوران حول المحور ينتج الليل والنهار.</code>' +
+                '<code>ميل المحور ينتج الفصول الأربعة.</code>';
+            if (opts && opts.onChange) opts.onChange({ kind: 'earth-3d', tilt: tilt, spin: spin });
+        }
+
+        container.appendChild(bar);
+        bar.appendChild(slider('ميل المحور (درجة)', 0, 45, 1, tilt, function (v) { tilt = v; update(); }));
+        bar.appendChild(slider('زاوية الدوران', 0, 6.28, 0.1, spin, function (v) { spin = v; update(); }));
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                return [
+                    'الأرض كرة تدور حول محور مائل بزاوية ' + fmt(tilt, 1) + ' درجة.',
+                    'دورانها حول نفسها ينتج الليل والنهار، وميل المحور ينتج الفصول الأربعة.',
+                    'أشعة الشمس متوازية؛ النصف المواجه لها نهار، والنصف الآخر ليل.',
+                ];
+            },
+        };
+    };
+
+    /* 5b) الذرة — a nucleus with the electron shells filled in order. */
+    KINDS['atom-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var Z = p.z != null ? p.z : 6;   // atomic number = electrons to place
+
+        var SHELLS = [2, 8, 18, 32, 32, 18, 8];   // capacity per shell
+        var NAMES = ['K', 'L', 'M', 'N', 'O', 'P', 'Q'];
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 12, yaw: 0.8, pitch: 0.35 });
+
+        function place(m, x, y, z) { m.v = m.v.map(function (q) { return [q[0] + x, q[1] + y, q[2] + z]; }); return m; }
+
+        function fill() {
+            var left = Math.max(0, Math.round(Z)), out = [];
+            for (var i = 0; i < SHELLS.length && left > 0; i++) {
+                var take = Math.min(SHELLS[i], left);
+                out.push(take); left -= take;
+            }
+            return out;
+        }
+
+        function build() {
+            scene.clear();
+            var nuc = sphere(0.75, 18); nuc.color = [225, 29, 72]; scene.add(nuc);
+            var counts = fill();
+            counts.forEach(function (n, i) {
+                var r = 1.5 + i * 1.15;
+                // The shell itself.
+                var prev = null;
+                for (var k = 0; k <= 40; k++) {
+                    var a = k / 40 * Math.PI * 2;
+                    var pt = [r * Math.cos(a), r * Math.sin(a) * 0.35, r * Math.sin(a)];
+                    if (prev) scene.line(prev, pt, '#cbd5e1', 1);
+                    prev = pt;
+                }
+                for (var e = 0; e < n; e++) {
+                    var t = (e / n) * Math.PI * 2 + i;
+                    var el = place(sphere(0.16, 10), r * Math.cos(t), r * Math.sin(t) * 0.35, r * Math.sin(t));
+                    el.color = [37, 99, 235];
+                    scene.add(el);
+                }
+            });
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = Math.max(8, 4 + counts.length * 2.4);
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            var counts = fill();
+            var lines = '<code>العدد الذري = ' + Math.round(Z) + ' (عدد الإلكترونات)</code>';
+            counts.forEach(function (n, i) { lines += '<code>المستوى ' + NAMES[i] + ': ' + n + ' إلكترون</code>'; });
+            read.innerHTML = lines;
+            if (opts && opts.onChange) opts.onChange({ kind: 'atom-3d', z: Z, shells: counts });
+        }
+
+        container.appendChild(bar);
+        bar.appendChild(slider('العدد الذري', 1, 20, 1, Z, function (v) { Z = v; update(); }));
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                var counts = fill();
+                return [
+                    'هذه ذرة عددها الذري ' + Math.round(Z) + '.',
+                    'في المركز النواة (بروتونات ونيوترونات)، وتدور حولها الإلكترونات في مستويات.',
+                    'عدد الإلكترونات يساوي العدد الذري، وتتوزع على المستويات: ' + counts.join(' ، ') + '.',
+                ];
+            },
+        };
+    };
+
+    /* 6) الجزيء — ball-and-stick model of a simple molecule. */
+    KINDS['molecule-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var name = p.molecule || 'water';
+
+        var MOLS = {
+            water: { label: 'جزيء الماء H₂O', center: 'O', atoms: [['O', 0, 0, 0, 0.9], ['H', 1.1, 0.7, 0, 0.55], ['H', -1.1, 0.7, 0, 0.55]], bonds: [[0, 1], [0, 2]] },
+            co2: { label: 'جزيء ثاني أكسيد الكربون CO₂', center: 'C', atoms: [['C', 0, 0, 0, 0.8], ['O', 1.6, 0, 0, 0.85], ['O', -1.6, 0, 0, 0.85]], bonds: [[0, 1], [0, 2]] },
+            methane: { label: 'جزيء الميثان CH₄', center: 'C', atoms: [['C', 0, 0, 0, 0.8], ['H', 1, 1, 1, 0.5], ['H', -1, -1, 1, 0.5], ['H', -1, 1, -1, 0.5], ['H', 1, -1, -1, 0.5]], bonds: [[0, 1], [0, 2], [0, 3], [0, 4]] },
+            ammonia: { label: 'جزيء الأمونيا NH₃', center: 'N', atoms: [['N', 0, 0.4, 0, 0.8], ['H', 1, -0.5, 0, 0.5], ['H', -0.5, -0.5, 0.9, 0.5], ['H', -0.5, -0.5, -0.9, 0.5]], bonds: [[0, 1], [0, 2], [0, 3]] },
+        };
+        var COLORS = { O: [225, 29, 72], H: [148, 163, 184], C: [51, 65, 85], N: [37, 99, 235] };
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 9, yaw: 0.8, pitch: 0.4 });
+
+        function build() {
+            scene.clear();
+            var mol = MOLS[name];
+            mol.bonds.forEach(function (b) {
+                var a = mol.atoms[b[0]], c = mol.atoms[b[1]];
+                scene.line([a[1], a[2], a[3]], [c[1], c[2], c[3]], '#94a3b8', 5);
+            });
+            mol.atoms.forEach(function (at) {
+                var s = sphere(at[4], 20);
+                s.v = s.v.map(function (q) { return [q[0] + at[1], q[1] + at[2], q[2] + at[3]]; });
+                s.color = COLORS[at[0]] || SLATE;
+                scene.add(s);
+            });
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = 8;
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            read.innerHTML =
+                '<code>' + MOLS[name].label + '</code>' +
+                '<code>الذرات: ' + MOLS[name].atoms.map(function (a) { return a[0]; }).join(' ، ') + '</code>' +
+                '<code>الروابط: ' + MOLS[name].bonds.length + '</code>';
+            if (opts && opts.onChange) opts.onChange({ kind: 'molecule-3d', molecule: name });
+        }
+
+        container.appendChild(pick('الجزيء', [['water', 'ماء H₂O'], ['co2', 'ثاني أكسيد الكربون CO₂'], ['methane', 'ميثان CH₄'], ['ammonia', 'أمونيا NH₃']], name, function (v) { name = v; update(); }));
+        container.appendChild(bar);
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                return [
+                    'هذا نموذج ' + MOLS[name].label + ' بالكرات والعصي.',
+                    'تمثّل الكرات الذرات، وتمثّل العصي الروابط بينها.',
+                    'اسحب النموذج لترى شكله في الفضاء من كل الجهات.',
+                ];
+            },
+        };
+    };
+
+    /* 7) الخلية — a cell with its nucleus and organelles; plant adds a wall. */
+    KINDS['cell-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var plant = p.plant !== false;
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 11, yaw: 0.8, pitch: 0.4 });
+
+        function put(m, x, y, z) { m.v = m.v.map(function (q) { return [q[0] + x, q[1] + y, q[2] + z]; }); return m; }
+
+        function build() {
+            scene.clear();
+            var R = 2.4;
+            if (plant) {
+                var wall = box(R * 2.1, R * 2.1, R * 2.1); wall.color = [13, 148, 136]; scene.add(wall);
+            }
+            var membrane = sphere(R, 26); membrane.color = [37, 99, 235]; scene.add(membrane);
+            var nucleus = put(sphere(0.95, 20), 0.7, 0.4, 0.3); nucleus.color = [139, 92, 246]; scene.add(nucleus);
+            var vac = put(sphere(0.7, 18), -0.9, -0.6, -0.4); vac.color = [14, 165, 233]; scene.add(vac);
+            var mito = put(sphere(0.4, 14), -0.8, 0.8, 0.6); mito.color = [225, 29, 72]; scene.add(mito);
+            var chloro = put(sphere(0.4, 14), 0.9, -0.8, -0.7); chloro.color = [22, 163, 74]; scene.add(chloro);
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = plant ? 11 : 9;
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            read.innerHTML =
+                '<code>نوع الخلية: ' + (plant ? 'خلية نباتية' : 'خلية حيوانية') + '</code>' +
+                '<code>النواة تنظم نشاط الخلية.</code>' +
+                (plant ? '<code>الجدار الخلوي يمنح الخلية النباتية شكلًا ثابتًا.</code>' : '<code>لا يوجد جدار خلوي ولا بلاستيدات في الخلية الحيوانية.</code>');
+            if (opts && opts.onChange) opts.onChange({ kind: 'cell-3d', plant: plant });
+        }
+
+        container.appendChild(pick('نوع الخلية', [[true, 'نباتية'], [false, 'حيوانية']], plant, function (v) { plant = (v === true || v === 'true'); update(); }));
+        container.appendChild(bar);
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                var lines = ['هذه ' + (plant ? 'خلية نباتية' : 'خلية حيوانية') + ' مجسّمة.']; 
+                lines.push('في الوسط النواة، وهي مركز التحكم في الخلية.');
+                lines.push(plant ? 'تحيط بها بلاستيدات خضراء وجدار خلوي.' : 'تحيط بها أغشية وعضيّات مختلفة.');
+                return lines;
+            },
+        };
+    };
+
+    /* 8) المنشور والضوء — a triangular prism splitting white light. */
+    KINDS['prism-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var angle = p.angle != null ? p.angle : 60;
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 13, yaw: 0.9, pitch: 0.35 });
+        var RAINBOW = ['#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#8b5cf6'];
+
+        function build() {
+            scene.clear();
+            var pr = prism(3, 1.6, 4.5); pr.color = [203, 213, 225]; scene.add(pr);
+            // The incident white ray, then one dispersed ray per spectral colour.
+            scene.line([-8, 0.6, 0], [-1.2, 0.2, 0], '#f8fafc', 3);
+            RAINBOW.forEach(function (col, i) {
+                var spread = (i - (RAINBOW.length - 1) / 2) * 0.55;
+                scene.line([1.2, 0.2, 0], [8, spread, 0], col, 2);
+            });
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = 14;
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            read.innerHTML =
+                '<code>زاوية المنشور = ' + fmt(angle, 0) + '°</code>' +
+                '<code>الضوء الأبيض ينكسر ويتحلل إلى ألوان الطيف.</code>' +
+                '<code>كل لون له معامل انكسار مختلف.</code>';
+            if (opts && opts.onChange) opts.onChange({ kind: 'prism-3d', angle: angle });
+        }
+
+        container.appendChild(bar);
+        bar.appendChild(slider('زاوية المنشور', 30, 90, 5, angle, function (v) { angle = v; update(); }));
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                return [
+                    'يسقط شعاع ضوء أبيض على منشور ثلاثي.',
+                    'ينكسر الضوء مرتين عند دخوله وخروجه، فيتحلل إلى ألوان الطيف.',
+                    'يظهر الطيف بالترتيب: أحمر، برتقالي، أصفر، أخضر، أزرق، بنفسجي.',
+                ];
+            },
+        };
+    };
+
+    /* 9) أجزاء النبات — the plant's parts, each labelled. */
+    KINDS['plant-3d'] = function (container, spec, opts) {
+        var p = spec.params || {};
+        var show = p.show || 'all';
+
+        var read = readout();
+        var bar = controls();
+        var scene = new Scene(container, { height: 340, dist: 14, yaw: 0.6, pitch: 0.3 });
+
+        function put(m, x, y, z) { m.v = m.v.map(function (q) { return [q[0] + x, q[1] + y, q[2] + z]; }); return m; }
+
+        function build() {
+            scene.clear();
+            var showRoots = show === 'all' || show === 'roots';
+            var showStem = show === 'all' || show === 'stem';
+            var showLeaves = show === 'all' || show === 'leaves';
+            var showFlower = show === 'all' || show === 'flower';
+
+            if (showRoots) {
+                [-0.6, 0, 0.6].forEach(function (x) {
+                    var r = put(cylinder(0.12, 2.2, 12), x, -2.2, 0); r.color = [120, 53, 15]; scene.add(r);
+                });
+            }
+            if (showStem) {
+                var s = put(cylinder(0.28, 4.4, 16), 0, 0, 0); s.color = [22, 163, 74]; scene.add(s);
+            }
+            if (showLeaves) {
+                [[1.1, 1.2], [-1.1, 0.2], [1.1, -0.8]].forEach(function (l) {
+                    var lf = put(box(2, 0.12, 1.1), l[0], l[1], 0); lf.color = [34, 197, 94]; scene.add(lf);
+                });
+            }
+            if (showFlower) {
+                var f = put(sphere(0.7, 18), 0, 2.6, 0); f.color = [225, 29, 72]; scene.add(f);
+            }
+            scene.camera.target = [0, 0, 0];
+            scene.camera.dist = 13;
+        }
+
+        function update() {
+            build();
+            scene.draw();
+            var names = { all: 'كل الأجزاء', roots: 'الجذر', stem: 'الساق', leaves: 'الأوراق', flower: 'الزهرة' };
+            read.innerHTML =
+                '<code>الجزء المعروض: ' + names[show] + '</code>' +
+                '<code>الجذر يثبّت النبات ويمتص الماء والأملاح.</code>' +
+                '<code>الساق ينقل الماء، والأوراق تصنع الغذاء.</code>';
+            if (opts && opts.onChange) opts.onChange({ kind: 'plant-3d', show: show });
+        }
+
+        container.appendChild(pick('الجزء', [['all', 'كل الأجزاء'], ['roots', 'الجذر'], ['stem', 'الساق'], ['leaves', 'الأوراق'], ['flower', 'الزهرة']], show, function (v) { show = v; update(); }));
+        container.appendChild(bar);
+        update();
+        container.appendChild(read);
+
+        return {
+            destroy: function () { scene.destroy(); },
+            narrate: function () {
+                return [
+                    'هذا نبات مجسّم بأجزائه الرئيسة.',
+                    'الجذر يثبّت النبات في التربة ويمتص الماء والأملاح المعدنية.',
+                    'الساق ينقل الماء إلى الأوراق، والأوراق تصنع الغذاء بالبناء الضوئي، والزهرة عضو التكاثر.',
+                ];
+            },
+        };
+    };
+
     // ------------------------------------------------------------------ public
     window.Interactive3D = {
         kinds: Object.keys(KINDS),
