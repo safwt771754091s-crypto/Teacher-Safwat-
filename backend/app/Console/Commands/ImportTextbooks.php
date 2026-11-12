@@ -400,12 +400,10 @@ class ImportTextbooks extends Command
     private function download(string $url, string $dir, int $attempts = 1, ?float $deadline = null): ?string
     {
         $file = $dir.'/'.substr(sha1($url), 0, 12).'.pdf';
-        // The official host serves the PDF only when the request looks like it
-        // came from its own download page; without the referer it bounces us to
-        // the homepage, so a naive download "succeeds" with an HTML file and the
-        // book is silently never ingested.
         $url = $this->normalizeDownloadUrl($url);
-        $referer = 'https://www.yemenbooks.com/';
+        // Only the official book host needs the referer; sending it to any other
+        // host (e.g. the WordPress mirror) can trip WAF/referer rules and hang.
+        $referer = str_contains($url, 'yemen-books.com') ? 'https://www.yemenbooks.com/' : null;
         // Never outlive the batch budget: a slow host must not hold a web request
         // open past its limit, or the caller times out and the book never lands.
         $maxTime = $deadline !== null
@@ -414,18 +412,28 @@ class ImportTextbooks extends Command
         // curl's own retries multiply the wall time; when a deadline is set we do
         // a single bounded attempt so the batch cannot overshoot.
         $retries = $deadline !== null ? 0 : 2;
+        // A container with broken IPv6 hangs on the connect for the whole budget
+        // (seen on Render); forcing IPv4 and failing fast on connect lets a dead
+        // host fall through to the next book instead of eating the batch.
+        $connectTimeout = min(20, $maxTime);
+        $ua = 'Mozilla/5.0 (compatible; TeacherSafwatBot/1.0; +https://yemeni-smart-teacher-api.onrender.com)';
         for ($i = 0; $i < $attempts; $i++) {
             if ($deadline !== null && microtime(true) >= $deadline) {
                 break;
             }
-            @shell_exec(sprintf(
-                'curl -sL --fail --max-time %d --retry %d -e %s -o %s %s',
+            $cmd = sprintf(
+                'curl -sL --fail --ipv4 --connect-timeout %d --max-time %d --retry %d -A %s -o %s %s',
+                $connectTimeout,
                 $maxTime,
                 $retries,
-                escapeshellarg($referer),
+                escapeshellarg($ua),
                 escapeshellarg($file),
                 escapeshellarg($url),
-            ));
+            );
+            if ($referer !== null) {
+                $cmd .= ' -e '.escapeshellarg($referer);
+            }
+            @shell_exec($cmd);
             if (is_file($file) && filesize($file) > 1024 && $this->looksLikePdf($file)) {
                 return $file;
             }

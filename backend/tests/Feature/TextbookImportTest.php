@@ -94,12 +94,17 @@ class TextbookImportTest extends TestCase
         $this->assertFileExists(base_path(TextbookImportService::MANIFESTS['live']));
 
         // Every URL in the verified manifest must be a real http(s) link, so an
-        // import never wastes a batch on a placeholder.
+        // import never wastes a batch on a placeholder. The reader endpoint
+        // (open.php) is excluded: it only redirects through a slow third-party
+        // host, which stalls a bounded batch, so the manifest ships direct PDFs.
         $manifest = json_decode((string) file_get_contents(base_path(TextbookImportService::MANIFESTS['live'])), true);
         $this->assertIsArray($manifest);
         $this->assertNotEmpty($manifest);
         foreach ($manifest as $entry) {
             $this->assertStringStartsWith('https://', (string) ($entry['url'] ?? ''));
+            $this->assertStringNotContainsString('open.php', (string) ($entry['url'] ?? ''));
+            $this->assertNotEmpty($entry['grade_level'] ?? null);
+            $this->assertNotEmpty($entry['subject'] ?? null);
         }
     }
 
