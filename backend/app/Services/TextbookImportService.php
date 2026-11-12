@@ -19,6 +19,10 @@ class TextbookImportService
 {
     /** Manifests an owner may import from, keyed by a stable short name. */
     public const MANIFESTS = [
+        // Verified real PDFs for the adopted (Aden + shared) curriculum: every
+        // URL was fetched and its page count checked, so an import yields real
+        // book text instead of failing on a dead link. This is the default.
+        'live' => 'database/data/yemen_books_live.json',
         'all' => 'database/data/yemen_books_all.json',
         'aden' => 'database/data/yemen_books_aden.json',
         'sanaa' => 'database/data/yemen_books.json',
@@ -28,9 +32,8 @@ class TextbookImportService
     public static function defaultManifest(): string
     {
         return match (config('platform.curriculum.authority')) {
-            'aden' => 'aden',
             'sanaa' => 'sanaa',
-            default => 'all',
+            default => 'live',
         };
     }
 
@@ -39,7 +42,7 @@ class TextbookImportService
      *
      * @return array{ok:bool,imported?:int,skipped?:int,failed?:int,next_offset?:int,consumed?:int,timed_out?:bool,error?:string}
      */
-    public function runBatch(string $manifestKey, int $offset, int $maxSeconds, ?int $grade = null, bool $force = false): array
+    public function runBatch(string $manifestKey, int $offset, int $maxSeconds, ?int $grade = null, bool $force = false, bool $draftLessons = false): array
     {
         $rel = self::MANIFESTS[$manifestKey] ?? self::MANIFESTS[self::defaultManifest()];
         $path = base_path($rel);
@@ -58,6 +61,12 @@ class TextbookImportService
         }
         if ($force) {
             $options['--force'] = true;
+        }
+        if ($draftLessons) {
+            // Segment each finished book's real pages into lessons, replacing the
+            // curriculum outline. Without this the book holds text but the student
+            // still reads the seeded index.
+            $options['--draft-lessons'] = true;
         }
 
         Artisan::call('textbooks:import', $options);
