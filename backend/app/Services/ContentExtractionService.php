@@ -85,13 +85,13 @@ class ContentExtractionService
      *
      * @return array{pages_total:int,processed:int,ocr_pages:int}
      */
-    public function extractPdfRange(Textbook $textbook, int $from, int $limit, ?string $localPath = null): array
+    public function extractPdfRange(Textbook $textbook, int $from, int $limit, ?string $localPath = null, ?float $deadline = null): array
     {
         $from = max(1, $from);
         $limit = max(1, $limit);
         $empty = ['pages_total' => 0, 'processed' => 0, 'ocr_pages' => 0];
 
-        $run = function (string $pdf) use ($textbook, $from, $limit) {
+        $run = function (string $pdf) use ($textbook, $from, $limit, $deadline) {
             // The text layer needs no external binary; only OCR does, and that is
             // checked below. Counting the layer this way keeps a book readable on
             // a host without poppler installed.
@@ -114,10 +114,12 @@ class ContentExtractionService
                     break;
                 }
             }
-            $ocr = ($needOcr && $this->ocrAvailable()) ? $this->ocrPdfPageRange($pdf, $from, $to) : [];
+            $ocr = ($needOcr && $this->ocrAvailable()) ? $this->ocrPdfPageRange($pdf, $from, $to, $deadline) : [];
 
             $processed = 0;
             $ocrPages = 0;
+            $now = now();
+            $rows = [];
             for ($n = $from; $n <= $to; $n++) {
                 $layer = $textPages[$n] ?? '';
                 $useOcr = ! $this->looksReadable($layer) && ! empty($ocr[$n]);
@@ -125,11 +127,21 @@ class ContentExtractionService
                 if ($useOcr) {
                     $ocrPages++;
                 }
-                TextbookPage::updateOrCreate(
-                    ['textbook_id' => $textbook->id, 'page_number' => $n],
-                    ['extracted_text' => $text, 'status' => $text !== '' ? 'extracted' : 'raw'],
-                );
+                $rows[] = [
+                    'textbook_id' => $textbook->id,
+                    'page_number' => $n,
+                    'extracted_text' => $text,
+                    'status' => $text !== '' ? 'extracted' : 'raw',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
                 $processed++;
+            }
+            // One statement for the whole slice: a page-at-a-time save is a round
+            // trip per page, which on a remote database costs more wall time than
+            // the extraction itself and blows the batch budget.
+            if ($rows) {
+                TextbookPage::upsert($rows, ['textbook_id', 'page_number'], ['extracted_text', 'status', 'updated_at']);
             }
 
             $textbook->update(['pages_count' => max($textbook->pages_count, $pagesTotal)]);
@@ -204,16 +216,32 @@ class ContentExtractionService
      *
      * @return array<int, string> page number => recognised text
      */
-    private function ocrPdfPageRange(string $absolutePath, int $from, int $to): array
+    private function ocrPdfPageRange(string $absolutePath, int $from, int $to, ?float $deadline = null): array
     {
         $out = [];
         $tmp = sys_get_temp_dir() . '/ocr_' . bin2hex(random_bytes(6));
         @mkdir($tmp, 0775, true);
 
+        // Hard bound on the external binaries. Without this the rasterise+OCR of a
+        // whole slice can outlive the batch budget on a slow host, so the web call
+        // times out and the book never lands. `timeout` leaves the batch able to
+        // return and resume; whatever pages did complete are kept (upserted).
+        //
+        // The remaining budget is recomputed before each command: two commands each
+        // given the full budget would run for twice as long as the batch allows.
+        $timeoutPrefix = function () use ($deadline): string {
+            if ($deadline === null) {
+                return '';
+            }
+            $remaining = (int) ($deadline - microtime(true));
+            return $remaining >= 2 ? 'timeout '.$remaining.' ' : 'false ';
+        };
+
         try {
             $dpi = (int) config('platform.ocr.dpi', 220);
             @shell_exec(sprintf(
-                '%s -f %d -l %d -r %d -png %s %s 2>/dev/null',
+                '%s%s -f %d -l %d -r %d -png %s %s 2>/dev/null',
+                $timeoutPrefix(),
                 escapeshellarg(config('platform.ocr.pdftoppm')),
                 $from,
                 $to,
@@ -232,8 +260,9 @@ class ContentExtractionService
                 config('platform.ocr.language'),
             ));
             @shell_exec(sprintf(
-                'cd %s && ls page*.png 2>/dev/null | xargs -r -P %d -n1 sh %s',
+                'cd %s && ls page*.png 2>/dev/null | %sxargs -r -P %d -n1 sh %s',
                 escapeshellarg($tmp),
+                $timeoutPrefix(),
                 $workers,
                 escapeshellarg($script),
             ));

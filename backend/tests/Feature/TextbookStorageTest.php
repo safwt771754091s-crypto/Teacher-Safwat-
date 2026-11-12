@@ -95,6 +95,26 @@ class TextbookStorageTest extends TestCase
         return app(TextbookExportService::class)->pdf($html);
     }
 
+    public function test_re_running_a_slice_updates_pages_instead_of_duplicating_them(): void
+    {
+        // A batch that runs out of time re-reads the same pages on the next call.
+        // The upsert must therefore replace a page in place; a second insert would
+        // break the (textbook_id, page_number) unique key and abort the resume.
+        $book = Textbook::whereHas('lessons')->firstOrFail();
+        $extractor = app(ContentExtractionService::class);
+        $pdf = tempnam(sys_get_temp_dir(), 'book').'.pdf';
+        file_put_contents($pdf, $this->samplePdf());
+
+        try {
+            $extractor->extractPdfRange($book, 1, 2, $pdf);
+            $extractor->extractPdfRange($book, 1, 2, $pdf);
+        } finally {
+            @unlink($pdf);
+        }
+
+        $this->assertSame(2, $book->pages()->whereIn('page_number', [1, 2])->count());
+    }
+
     public function test_source_url_is_trimmed_on_save(): void
     {
         $book = Textbook::whereHas('lessons')->firstOrFail();

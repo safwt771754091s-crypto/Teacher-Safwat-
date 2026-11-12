@@ -72,6 +72,13 @@ class ImportTextbooks extends Command
         $maxSeconds = (int) $this->option('max-seconds');
         $say = fn (string $msg) => $json ? null : $this->line($msg);
 
+        // Soft deadline for the slow steps (download, OCR). It leaves a margin so
+        // the batch can persist what it read and return *before* the caller's own
+        // timeout; the whole point is that a web-triggered batch never runs long.
+        $deadline = $maxSeconds > 0
+            ? $this->startedAt + $maxSeconds - min(10.0, max(2.0, $maxSeconds * 0.15))
+            : null;
+
         if ($this->option('no-ocr')) {
             config(['platform.ocr.enabled' => false]);
         }
@@ -136,9 +143,11 @@ class ImportTextbooks extends Command
             // A scanned book (or one left with font-mojibake) must be retried so
             // OCR fills it in, and a partially-extracted book (a batch that ran
             // out of time) must continue from where it stopped.
-            $pages = $textbook->pages()->pluck('extracted_text');
-            $readable = $pages->filter(fn ($t) => $extractor->textIsReadable((string) $t))->count();
-            $stored = $pages->count();
+            // Count in SQL instead of loading every page's text: a book can hold
+            // thousands of pages of OCR text, and hydrating it just to decide
+            // whether the book is finished costs more than the extraction.
+            $stored = $textbook->pages()->count();
+            $readable = $textbook->pages()->where('extracted_text', '!=', '')->count();
             $total = max(1, (int) $textbook->pages_count);
             if (! $this->option('force') && $stored >= $total && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
                 $say('↷ already ingested: '.$textbook->title);
@@ -149,9 +158,15 @@ class ImportTextbooks extends Command
             }
 
             $say('▶ '.$entry['title']);
-            $remaining = $maxSeconds > 0 ? $maxSeconds - (microtime(true) - $this->startedAt) : 0;
-            $file = $this->download($entry['url'], $dir, 2, $remaining);
+            $file = $this->download($entry['url'], $dir, 2, $deadline);
             if (! $file) {
+                // Ran out of time mid-download: stop here and retry this book on
+                // the next call instead of skipping past it.
+                if ($deadline !== null && microtime(true) >= $deadline) {
+                    $this->consumedBack = true;
+                    $timedOut = true;
+                    break;
+                }
                 if (! $json) {
                     $this->error('  download failed');
                 }
@@ -170,7 +185,11 @@ class ImportTextbooks extends Command
             $total = max(1, (int) $textbook->pages_count);
             try {
                 while (true) {
-                    $pages = $extractor->extractPdfRange($textbook, $page, $slice, $file);
+                    if ($deadline !== null && microtime(true) >= $deadline) {
+                        $partial = true;
+                        break;
+                    }
+                    $pages = $extractor->extractPdfRange($textbook, $page, $slice, $file, $deadline);
                     $total = (int) $pages['pages_total'];
                     if ($total === 0 || $pages['processed'] === 0) {
                         break;
@@ -334,7 +353,7 @@ class ImportTextbooks extends Command
         return $next;
     }
 
-    private function download(string $url, string $dir, int $attempts = 1, float $budgetSeconds = 0): ?string
+    private function download(string $url, string $dir, int $attempts = 1, ?float $deadline = null): ?string
     {
         $file = $dir.'/'.substr(sha1($url), 0, 12).'.pdf';
         // The official host serves the PDF only when the request looks like it
@@ -345,11 +364,20 @@ class ImportTextbooks extends Command
         $referer = 'https://www.yemenbooks.com/';
         // Never outlive the batch budget: a slow host must not hold a web request
         // open past its limit, or the caller times out and the book never lands.
-        $maxTime = $budgetSeconds > 0 ? max(30, min(900, (int) $budgetSeconds)) : 900;
+        $maxTime = $deadline !== null
+            ? max(15, min(900, (int) ($deadline - microtime(true))))
+            : 900;
+        // curl's own retries multiply the wall time; when a deadline is set we do
+        // a single bounded attempt so the batch cannot overshoot.
+        $retries = $deadline !== null ? 0 : 2;
         for ($i = 0; $i < $attempts; $i++) {
+            if ($deadline !== null && microtime(true) >= $deadline) {
+                break;
+            }
             @shell_exec(sprintf(
-                'curl -sL --fail --max-time %d --retry 2 -e %s -o %s %s',
+                'curl -sL --fail --max-time %d --retry %d -e %s -o %s %s',
                 $maxTime,
+                $retries,
                 escapeshellarg($referer),
                 escapeshellarg($file),
                 escapeshellarg($url),
