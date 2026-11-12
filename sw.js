@@ -19,7 +19,7 @@
  */
 'use strict';
 
-var CACHE = 'safwat-shell-v8';
+var CACHE = 'safwat-shell-v9';
 var SHELL = [
     './',
     './index.html',
@@ -28,10 +28,10 @@ var SHELL = [
     './assets/config.js?v=11',
     './assets/api.js?v=6',
     './assets/interactive.js?v=2',
-    './assets/interactive3d.js?v=1',
+    './assets/interactive3d.js?v=2',
     './assets/interactive-lessons.js?v=1',
     './assets/interactive-science.js?v=1',
-    './assets/app.js?v=24',
+    './assets/app.js?v=25',
     './assets/pwa.js?v=2',
     './assets/icons/icon-192.png',
     './assets/icons/icon-512.png',
