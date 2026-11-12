@@ -147,9 +147,20 @@ class ImportTextbooks extends Command
             // thousands of pages of OCR text, and hydrating it just to decide
             // whether the book is finished costs more than the extraction.
             $stored = $textbook->pages()->count();
-            $readable = $textbook->pages()->where('extracted_text', '!=', '')->count();
+            // Seeded outline stubs must not count as readable content: a book
+            // holding only stubs is not ingested, it is still an outline.
+            $readable = $textbook->pages()
+                ->where('extracted_text', '!=', '')
+                ->where('extracted_text', 'not like', '%محتوى هيكلي من فهرس المنهج%')
+                ->where('extracted_text', 'not like', '%نتعرف في هذا الدرس على%')
+                ->count();
             $total = max(1, (int) $textbook->pages_count);
-            if (! $this->option('force') && $stored >= $total && $readable > 0 && $readable >= (int) ceil($total * 0.6)) {
+            // Skip a book when it was fully ingested on an earlier run, or when
+            // it already holds real text on nearly every page (adopted from a
+            // pre-marker import). A book with only outline stubs fails both, so
+            // it is fetched and OCR'd; a book left half-done resumes.
+            $richAlready = $stored >= $total && $readable >= (int) ceil($total * 0.9);
+            if (! $this->option('force') && ($textbook->ingested_at !== null || $richAlready)) {
                 $say('↷ already ingested: '.$textbook->title);
                 $done++;
                 $skipped++;
@@ -236,6 +247,10 @@ class ImportTextbooks extends Command
                 $say("  drafted {$created} lessons");
             }
 
+            // Mark the book ingested only now that its pages are fully stored, so
+            // a later run skips it instead of re-downloading and re-OCRing it.
+            $textbook->forceFill(['ingested_at' => now()])->save();
+
             if (! $this->option('keep-files')) {
                 @unlink($file);
             }
@@ -284,20 +299,39 @@ class ImportTextbooks extends Command
             ['icon' => 'book', 'color' => '#2f6a43', 'sort_order' => 99, 'is_active' => true],
         );
 
-        return Textbook::updateOrCreate(
-            ['subject_id' => $subject->id, 'title' => $entry['title']],
-            [
-                'term' => $entry['term'] ?? 'first',
-                'edition' => 'الطبعة الرسمية',
-                'publisher' => 'وزارة التربية والتعليم - الجمهورية اليمنية',
-                'authority' => $entry['authority'] ?? 'common',
-                'branch' => $entry['branch'] ?? 'general',
-                'source_type' => 'pdf',
-                // Keep the official source so pages can be re-rendered on demand.
-                'source_url' => $entry['url'] ?? null,
-                'status' => 'review',
-            ],
-        );
+        $term = $entry['term'] ?? 'first';
+
+        // Attach to the book the curriculum already seeded for this subject+term
+        // instead of forking a second book under the manifest's marketing title.
+        // The subject+term pair is the identity of the textbook; its title is a
+        // label. Matching on the title created a duplicate book whose real
+        // lessons sat beside — but apart from — the seeded outline, so the
+        // student still saw the outline.
+        $textbook = Textbook::where('subject_id', $subject->id)
+            ->where('term', $term)
+            ->orderBy('id')
+            ->first()
+            ?? new Textbook(['subject_id' => $subject->id, 'term' => $term]);
+
+        $textbook->fill([
+            'term' => $term,
+            'edition' => 'الطبعة الرسمية',
+            'publisher' => 'وزارة التربية والتعليم - الجمهورية اليمنية',
+            'authority' => $entry['authority'] ?? 'common',
+            'branch' => $entry['branch'] ?? 'general',
+            'source_type' => 'pdf',
+            // Keep the official source so pages can be re-rendered on demand.
+            'source_url' => $entry['url'] ?? null,
+            'status' => 'review',
+        ]);
+        // Keep the curriculum label for a book that already had one; a brand-new
+        // book takes the manifest's title.
+        if (! $textbook->exists || $textbook->title === null) {
+            $textbook->title = $entry['title'];
+        }
+        $textbook->save();
+
+        return $textbook;
     }
 
     /**
@@ -342,15 +376,25 @@ class ImportTextbooks extends Command
     /** The next page to extract, so a batch that ran out of time resumes here. */
     private function resumePage(Textbook $textbook, ContentExtractionService $extractor): int
     {
-        $pages = $textbook->pages()->orderBy('page_number')->get(['page_number', 'extracted_text']);
-        $next = 1;
-        foreach ($pages as $p) {
-            if ($extractor->textIsReadable((string) $p->extracted_text)) {
-                $next = max($next, (int) $p->page_number + 1);
+        // Return the first page that still lacks real book text — a missing row,
+        // an empty page, or a seeded outline stub. A book whose front pages hold
+        // stubs while its tail is already extracted must resume at the front, not
+        // past the tail, or the real front pages are never fetched.
+        $total = max(1, (int) $textbook->pages_count);
+        $pages = $textbook->pages()
+            ->where('page_number', '<=', $total)
+            ->orderBy('page_number')
+            ->get(['page_number', 'extracted_text'])
+            ->keyBy('page_number');
+
+        for ($n = 1; $n <= $total; $n++) {
+            $text = (string) ($pages[$n]->extracted_text ?? '');
+            if (! $extractor->textIsReadable($text) || $extractor->isPlaceholderPageText($text)) {
+                return $n;
             }
         }
 
-        return $next;
+        return $total + 1;
     }
 
     private function download(string $url, string $dir, int $attempts = 1, ?float $deadline = null): ?string

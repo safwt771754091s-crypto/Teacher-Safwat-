@@ -194,6 +194,16 @@ class ContentExtractionService
      */
     private function textLayerSlice(string $absolutePath, int $from, int $to): array
     {
+        // Prefer poppler's pdftotext: for Arabic it emits the glyphs in logical
+        // order, whereas the pure-PHP smalot parser returns the whole line
+        // right-to-left reversed ("ةيبترلا ةيملاسإلا" instead of "التربية
+        // الإسلامية"), which reads as gibberish and still passes a
+        // letters-present check. Fall back to smalot only when poppler is absent.
+        $viaPoppler = $this->textLayerViaPoppler($absolutePath, $from, $to);
+        if ($viaPoppler !== []) {
+            return $viaPoppler;
+        }
+
         $out = [];
         try {
             $pages = (new Parser())->parseFile($absolutePath)->getPages();
@@ -206,6 +216,44 @@ class ContentExtractionService
                 continue;
             }
             $out[$n] = trim((string) $page->getText());
+        }
+
+        return $out;
+    }
+
+    /** @return array<int,string> */
+    private function textLayerViaPoppler(string $absolutePath, int $from, int $to): array
+    {
+        if (! $this->binaryExists('pdftotext')) {
+            return [];
+        }
+
+        $raw = (string) @shell_exec(sprintf(
+            'pdftotext -enc UTF-8 -f %d -l %d %s - 2>/dev/null',
+            max(1, $from),
+            max($from, $to),
+            escapeshellarg($absolutePath),
+        ));
+        if ($raw === '') {
+            return [];
+        }
+
+        $out = [];
+        // pdftotext separates pages with a form feed and writes one after the
+        // last page too, so the split leaves a trailing empty element that is not
+        // a page. Drop it, or every book is counted one page too long and the
+        // importer chases a page that does not exist.
+        $parts = explode("\f", $raw);
+        if (count($parts) > 1 && end($parts) === '') {
+            array_pop($parts);
+        }
+        // The slice's first page is $from, so each split index maps to $from + index.
+        foreach ($parts as $i => $text) {
+            $n = $from + $i;
+            if ($n > $to) {
+                break;
+            }
+            $out[$n] = trim($text);
         }
 
         return $out;
@@ -741,9 +789,16 @@ class ContentExtractionService
      */
     public function draftLessonsFromPages(Textbook $textbook): int
     {
-        // Never overwrite curated lessons (authored/approved content). Only books
-        // with no published lessons are segmented from their page text.
-        if ($textbook->lessons()->where('status', 'published')->exists()) {
+        // Never overwrite curated lessons (authored/approved content). A published
+        // lesson counts as curated only when it lacks the curriculum-seeder stub
+        // note; the seeder publishes placeholder stubs too, and those must be
+        // replaced by the book's real text rather than blocking the draft — which
+        // is why the student otherwise kept reading the index.
+        $authored = $textbook->lessons()
+            ->where('status', 'published')
+            ->whereDoesntHave('sections', fn ($q) => $q->where('content', 'like', '%محتوى هيكلي من فهرس المنهج%'))
+            ->exists();
+        if ($authored) {
             return 0;
         }
 
@@ -1333,10 +1388,38 @@ class ContentExtractionService
         return $this->looksReadable($text);
     }
 
+    /**
+     * True when the stored page text is a curriculum-seeder outline stub rather
+     * than real book text. Such a page is not extracted content: the import must
+     * still fetch the real page behind it, or a book keeps its outline and the
+     * student reads the index.
+     */
+    public function isPlaceholderPageText(string $text): bool
+    {
+        foreach ([
+            'محتوى هيكلي من فهرس المنهج',                  // outline note
+            'نتعرف في هذا الدرس على',                      // outline point
+            'نشرح الدرس بالعربية، ونقرأ الكلمات الإنجليزية', // English outline note
+        ] as $marker) {
+            if (str_contains($text, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function looksReadable(string $text): bool
     {
         $text = trim($text);
         if (mb_strlen($text) < 2) {
+            return false;
+        }
+
+        // A seeded outline stub contains real letters, so the density test below
+        // would call it readable and OCR of the real page behind it would be
+        // skipped. Treat it as unreadable so the real page is fetched.
+        if ($this->isPlaceholderPageText($text)) {
             return false;
         }
 
