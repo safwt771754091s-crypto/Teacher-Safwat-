@@ -156,6 +156,17 @@ class FullCurriculumSeeder extends Seeder
     /** @param array<int, array{title: string, lessons: array<int, string>}> $units */
     private function seedBook(Textbook $book, array $units): void
     {
+        // A book that already carries real page content (imported and segmented)
+        // must not get the curriculum outline back on top: the outline lessons
+        // would sit beside the real lesson text and the student would read the
+        // index again. Only seed the outline while the book has no real lessons.
+        $hasRealContent = $book->lessons()
+            ->whereDoesntHave('sections', fn ($q) => $q->where('content', 'like', '%نتعرف في هذا الدرس على%'))
+            ->exists();
+        if ($hasRealContent) {
+            return;
+        }
+
         $order = 0;
         foreach ($units as $unit) {
             $unitTitle = (string) ($unit['title'] ?? '');

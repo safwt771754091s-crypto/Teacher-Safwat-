@@ -29,3 +29,7 @@ web/build
 # Tooling caches
 .openhands/
 .phpunit.result.cache
+
+# Crawlee/crawler runtime scratch
+backend/storage/key_value_stores/
+backend/storage/request_queues/
