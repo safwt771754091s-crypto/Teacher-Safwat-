@@ -96,7 +96,12 @@ class ContentExtractionService
             // checked below. Counting the layer this way keeps a book readable on
             // a host without poppler installed.
             $textPages = $this->textLayerSlice($pdf, $from, $from + $limit - 1);
-            $pagesTotal = max($this->pdfPageCount($pdf), $this->textLayerPageCount($pdf), $from + count($textPages) - 1);
+            // pdfinfo reports the page count in milliseconds; the pure-PHP parser
+            // walks the whole document and is far too slow to run on every slice
+            // of a large scanned book, so it is only a fallback for a host without
+            // poppler. Counting it per slice turned one book into minutes.
+            $pagesTotal = $this->pdfPageCount($pdf) ?: $this->textLayerPageCount($pdf);
+            $pagesTotal = max($pagesTotal, $from + count($textPages) - 1);
             if ($pagesTotal === 0) {
                 return ['pages_total' => 0, 'processed' => 0, 'ocr_pages' => 0];
             }
