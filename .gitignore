@@ -33,3 +33,6 @@ web/build
 # Crawlee/crawler runtime scratch
 backend/storage/key_value_stores/
 backend/storage/request_queues/
+
+# Downloaded textbook PDFs (large; re-created by backend/tools/crawl_yembooks.py)
+backend/database/data/books/
