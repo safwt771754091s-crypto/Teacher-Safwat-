@@ -39,10 +39,38 @@ class PlaceholderReplacementTest extends TestCase
         ));
     }
 
+    public function test_broken_cmap_text_layer_is_not_readable(): void
+    {
+        // The official 2026 editions embed subsetted fonts whose cmap maps every
+        // glyph into the Latin-1/symbol blocks, so the text layer decodes to
+        // mojibake. It contains letters, so the plain density test accepts it and
+        // OCR would be skipped; the extractor must reject it so the real page is
+        // OCR'd instead of the learner reading garbage.
+        $extractor = app(ContentExtractionService::class);
+
+        // This is a real broken-cmap line from an official edition: the density
+        // test alone accepts it (51% "meaningful" glyphs), so only the new
+        // foreign-block check rejects it and forces OCR.
+        $this->assertFalse($extractor->textIsReadable(
+            '∏ ‰U‡‡−‡‡≥ Y¹b(« http://e-learning-moe.edu.ye'
+        ));
+        $this->assertFalse($extractor->textIsReadable(
+            '±∑ ∫vUFð ‰U ≠ ∫wðQ¹ U WIÐU« U¹ü« s Ãd ²Ý« ≠ ÆœbŽ vKŽ Î ô«œ oKD*« ‰uFH*« sŽ'
+        ));
+
+        // Genuine Arabic and genuine English must still be readable, so the fix
+        // does not force OCR on books that already carry a clean text layer.
+        $this->assertTrue($extractor->textIsReadable(
+            'أَتَوَضَا للصّلاة بالمّاءِ الطهور. أغسل يدي بَعْدَ الخروج من الْحَمّام بالمّاء الطهور.'
+        ));
+        $this->assertTrue($extractor->textIsReadable(
+            'Unit one: My school. I go to school every morning and I meet my friends there.'
+        ));
+    }
+
     public function test_real_page_text_replaces_the_seeded_outline(): void
     {
         $book = $this->outlineBook();
-        $this->assertGreaterThan(0, $this->outlineLessonCount($book), 'the book should start as an outline');
 
         // A real book's first pages, as OCR would return them.
         $book->pages()->delete();

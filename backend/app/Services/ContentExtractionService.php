@@ -1446,6 +1446,24 @@ class ContentExtractionService
         // with almost no lowercase, so excluding uppercase separates the two.
         $len = mb_strlen($text);
         $meaningful = preg_match_all('/[\x{0600}-\x{06FF}a-z0-9]/u', $text);
-        return ($meaningful / $len) >= 0.35;
+        if (($meaningful / $len) < 0.35) {
+            return false;
+        }
+
+        // The official 2026 editions embed subsetted fonts whose cmap maps every
+        // glyph into the Latin-1 supplement and symbol blocks, so the text layer
+        // decodes to mojibake such as "±∑ ∫vUFð ‰U" instead of Arabic. Those
+        // glyphs are letters, so the density test above still passes and OCR of
+        // the real page would be skipped, leaving the learner to read garbage.
+        // Detect it: a run of Latin-1/symbol characters with little Arabic is not
+        // genuine prose. Real Arabic is >= 60% Arabic letters and real English is
+        // mostly lowercase ASCII, so neither trips this.
+        $arabic = preg_match_all('/[\x{0600}-\x{06FF}]/u', $text);
+        $foreign = preg_match_all('/[\x{00A0}-\x{00FF}\x{2000}-\x{2BFF}]/u', $text);
+        if (($foreign / $len) >= 0.15 && ($arabic / $len) < 0.60) {
+            return false;
+        }
+
+        return true;
     }
 }
